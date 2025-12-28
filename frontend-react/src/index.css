@@ -17,10 +17,8 @@ html, body {
   -webkit-overflow-scrolling: touch;
 }
 
-/* 防止 iOS 双击缩放 */
-* {
-  touch-action: manipulation;
-}
+/* 允许放大（恢复默认缩放行为） */
+/* 将全局的 touch-action 禁用移除；如果需要也可只对具体元素设置 */
  
 @layer base {
   :root {
@@ -82,4 +80,3 @@ body.wechat-viewer-active .layout-nav {
 .animate-fade-in-out {
   animation: fade-in-out 2s ease-in-out forwards;
 }
-
