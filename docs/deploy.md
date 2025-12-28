@@ -125,7 +125,3 @@ chmod 755 server/storage
 chmod 755 server/storage/originals
 chmod 755 server/storage/derivatives
 ```
-
-## 其他部署方式
-
-- [宝塔面板部署](DEPLOY_BT.md)
