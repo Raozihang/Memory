@@ -14,8 +14,8 @@
 
 **后端**
 - Node.js (原生 HTTP 服务器)
-- MySQL 或 JSON 文件存储 (可切换)
-- Sharp (图片处理，可选)
+- MySQL
+- Sharp
 
 ## 目录结构
 
@@ -59,7 +59,7 @@ npm install
 # 服务端口
 PORT=8080
 
-# 数据库配置 (可选，默认使用 JSON 文件存储)
+# 数据库配置
 USE_MYSQL=false
 DB_HOST=localhost
 DB_USER=root
@@ -90,15 +90,11 @@ node index.js
 - **相册详情** - 瀑布流展示照片，支持灯箱预览
 - **时间轴** - 按日期聚合浏览照片
 - **上传** - 支持批量上传，自动生成缩略图
-- **分享** - 生成分享链接
-- **导出** - 打包下载相册原图
 
 ## 文档
 
-- [API 文档](docs/api.openapi.yaml) - OpenAPI 规范
-- [数据库文档](docs/database.md) - 数据库结构与迁移指南
+- [数据库文档](docs/database.md) - 数据库结构
 - [部署指南](docs/deploy.md) - 通用部署说明
-- [宝塔部署](docs/DEPLOY_BT.md) - 宝塔面板部署指南
 - [安全说明](docs/security.md) - 安全与性能建议
 - [用户手册](docs/user-manual.md) - 使用说明
 
