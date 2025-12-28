@@ -1,33 +1,7 @@
 # 数据库文档
 
-本项目支持两种数据存储模式：
-- **JSON 文件存储** - 默认模式，适合开发和小规模使用
+本项目支持MySQL存储模式：
 - **MySQL 数据库** - 生产环境推荐
-
-## 存储模式切换
-
-通过 `server/.env` 中的 `USE_MYSQL` 环境变量控制：
-
-```ini
-# JSON 文件模式 (默认)
-USE_MYSQL=false
-
-# MySQL 模式
-USE_MYSQL=true
-```
-
-## JSON 文件存储
-
-数据文件位于 `server/data/` 目录：
-
-| 文件 | 说明 |
-|------|------|
-| `photos.json` | 照片记录 |
-| `albums.json` | 相册记录 |
-| `derivatives.json` | 缩略图/展示图记录 |
-| `exif.json` | EXIF 元数据 |
-| `shares.json` | 分享链接 |
-| `album_photos.json` | 相册-照片关联 |
 
 ## MySQL 数据库
 
@@ -90,20 +64,6 @@ DB_PORT=3306
 |------|------|------|
 | `photo_id` | VARCHAR(255) | 主键，关联照片 ID |
 | `exif_json` | JSON | EXIF 数据 |
-
-### 数据迁移
-
-从 JSON 文件迁移到 MySQL：
-
-```bash
-cd server
-node migrate.js
-```
-
-迁移脚本会：
-1. 创建数据库和表结构
-2. 导入现有 JSON 数据
-3. 脚本可重复执行，会跳过已存在的记录
 
 ## 文件存储
 
