@@ -14,8 +14,8 @@
 
 **后端**
 - Node.js (原生 HTTP 服务器)
-- MySQL 或 JSON 文件存储 (可切换)
-- Sharp (图片处理，可选)
+- MySQL
+- Sharp (图片处理)
 
 ## 目录结构
 
@@ -95,10 +95,8 @@ node index.js
 
 ## 文档
 
-- [API 文档](docs/api.openapi.yaml) - OpenAPI 规范
-- [数据库文档](docs/database.md) - 数据库结构与迁移指南
-- [部署指南](docs/deploy.md) - 通用部署说明
-- [宝塔部署](docs/DEPLOY_BT.md) - 宝塔面板部署指南
+- [数据库文档](docs/database.md) - 数据库结构
+- [部署指南](docs/deploy.md) - 部署说明
 - [安全说明](docs/security.md) - 安全与性能建议
 - [用户手册](docs/user-manual.md) - 使用说明
 
