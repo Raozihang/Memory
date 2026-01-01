@@ -23,7 +23,7 @@ export function WelcomeModal() {
         {/* Logo区域 */}
         <div className="mb-6">
           <img 
-            src="https://youke2.picui.cn/s1/2025/12/12/693c022f2f19e.png" 
+            src="/logo.png" 
             alt="Logo" 
             className="h-16 mx-auto"
           />
