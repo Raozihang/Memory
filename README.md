@@ -98,7 +98,6 @@ node index.js
 - [数据库文档](docs/database.md) - 数据库结构
 - [部署指南](docs/deploy.md) - 部署说明
 - [安全说明](docs/security.md) - 安全与性能建议
-- [用户手册](docs/user-manual.md) - 使用说明
 
 ## License
 
