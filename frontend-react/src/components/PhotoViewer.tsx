@@ -214,7 +214,7 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
       setLoadingOriginal(false);
       setLoadError(true);
     }
-  }, [originalUrl]);
+  }, [originalUrl, photo.id]);
 
   const handleNext = useCallback(() => {
     setIndex(i => (i + 1) % photos.length);
