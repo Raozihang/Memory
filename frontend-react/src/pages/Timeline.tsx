@@ -27,7 +27,7 @@ export default function Timeline() {
   const [columnWidth, setColumnWidth] = useState(200);
   
   // 滚动隐藏顶栏
-  const { setImmersive, isImmersive } = useLayout();
+  const { setImmersive, isImmersive, setTimelineCapsule } = useLayout();
   const lastScrollY = useRef(0);
   const ticking = useRef(false);
 
@@ -109,21 +109,95 @@ export default function Timeline() {
     return new Date();
   }, [groupedPhotos, mode]);
 
+  const [activeDate, setActiveDate] = useState<Date>(() => initialDate);
+
+  useEffect(() => {
+    if (availableDates.length === 0) return;
+    const normalize = mode === 'day' ? normalizeToDay : normalizeToHour;
+    setActiveDate((prev) => {
+      const normalizedPrev = normalize(prev);
+      const exact = availableDates.find(d => d.getTime() === normalizedPrev.getTime());
+      return exact ?? initialDate;
+    });
+  }, [availableDates, initialDate, mode]);
+
+  const groupKeyToDate = useMemo(() => {
+    const normalize = mode === 'day' ? normalizeToDay : normalizeToHour;
+    const map = new Map<string, Date>();
+    for (const [groupKey, groupPhotos] of groupedPhotos) {
+      map.set(groupKey, normalize(new Date(groupPhotos[0].taken_at)));
+    }
+    return map;
+  }, [groupedPhotos, mode]);
+
+  useEffect(() => {
+    if (groupedPhotos.length === 0) return;
+
+    const topOffset = isImmersive ? 80 : 140;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter(e => e.isIntersecting);
+        if (visible.length === 0) return;
+
+        visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        const best = visible[0];
+        const id = (best.target as HTMLElement).id;
+        const date = groupKeyToDate.get(id);
+        if (!date) return;
+
+        const normalize = mode === 'day' ? normalizeToDay : normalizeToHour;
+        const next = normalize(date);
+        setActiveDate(prev => {
+          const prevN = normalize(prev);
+          return prevN.getTime() === next.getTime() ? prev : next;
+        });
+      },
+      { root: null, threshold: 0, rootMargin: `-${topOffset}px 0px -70% 0px` }
+    );
+
+    const elements = groupedPhotos
+      .map(([groupKey]) => document.getElementById(groupKey))
+      .filter((el): el is HTMLElement => Boolean(el));
+
+    for (const el of elements) observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [groupKeyToDate, groupedPhotos, isImmersive, mode]);
+
   const handlePhotoClick = (groupPhotos: Photo[], index: number) => {
     setViewerPhotos(groupPhotos);
     setViewerIndex(index);
   };
 
-  const handleDateSelect = (date: Date) => {
+  const handleDateSelect = useCallback((date: Date) => {
+    const normalized = mode === 'day' ? normalizeToDay(date) : normalizeToHour(date);
+    setActiveDate(normalized);
     const dateStr = (mode === 'day' ? formatDayKey : formatHourKey)(date);
     const element = document.getElementById(dateStr);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  };
+  }, [mode]);
+
+  useEffect(() => {
+    if (availableDates.length === 0) {
+      setTimelineCapsule(null);
+      return;
+    }
+
+    setTimelineCapsule({
+      availableDates,
+      initialDate,
+      value: activeDate,
+      mode,
+      onDateSelect: handleDateSelect,
+    });
+
+    return () => setTimelineCapsule(null);
+  }, [activeDate, availableDates, handleDateSelect, initialDate, mode, setTimelineCapsule]);
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-6xl pb-40 md:pb-0">
       <div className={cn(
         "mb-8 sticky top-16 z-30 bg-background/95 backdrop-blur pb-4 pt-4 -mt-4 transition-all duration-300",
         isImmersive && "top-0"
@@ -161,6 +235,7 @@ export default function Timeline() {
           className="hidden md:flex"
           availableDates={availableDates}
           initialDate={initialDate}
+          value={activeDate}
           mode={mode}
         />
       </div>
