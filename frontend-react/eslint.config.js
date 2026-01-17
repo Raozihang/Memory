@@ -26,7 +26,7 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-empty': 'off',
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }]
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true, allowExportNames: ['useLayout', 'useScrollHide'] }]
     }
   }
 )
