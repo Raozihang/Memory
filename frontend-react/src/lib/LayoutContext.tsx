@@ -1,5 +1,13 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
+type TimelineCapsuleState = {
+  availableDates: Date[];
+  initialDate: Date;
+  value: Date;
+  mode: 'day' | 'hour';
+  onDateSelect: (date: Date) => void;
+};
+
 interface LayoutContextType {
   // PhotoViewer 打开时隐藏胶囊
   isViewerOpen: boolean;
@@ -7,6 +15,8 @@ interface LayoutContextType {
   // 滚动时隐藏顶栏和胶囊（用于沉浸式浏览）
   isImmersive: boolean;
   setImmersive: (immersive: boolean) => void;
+  timelineCapsule: TimelineCapsuleState | null;
+  setTimelineCapsule: (state: TimelineCapsuleState | null) => void;
 }
 
 const LayoutContext = createContext<LayoutContextType | null>(null);
@@ -14,13 +24,16 @@ const LayoutContext = createContext<LayoutContextType | null>(null);
 export function LayoutProvider({ children }: { children: ReactNode }) {
   const [isViewerOpen, setViewerOpen] = useState(false);
   const [isImmersive, setImmersive] = useState(false);
+  const [timelineCapsule, setTimelineCapsule] = useState<TimelineCapsuleState | null>(null);
 
   return (
     <LayoutContext.Provider value={{ 
       isViewerOpen, 
       setViewerOpen, 
       isImmersive, 
-      setImmersive 
+      setImmersive,
+      timelineCapsule,
+      setTimelineCapsule
     }}>
       {children}
     </LayoutContext.Provider>

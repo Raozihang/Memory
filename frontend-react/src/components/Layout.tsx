@@ -1,14 +1,16 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Home, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLayout } from '@/lib/LayoutContext';
+import { BottomCapsuleDateTimeline } from '@/components/DraggableDateTimeline';
 
 export function Layout() {
   const location = useLocation();
-  const { isViewerOpen, isImmersive } = useLayout();
+  const { isViewerOpen, isImmersive, timelineCapsule } = useLayout();
 
-  // 隐藏导航：查看原图时或沉浸模式时
-  const hideNav = isViewerOpen || isImmersive;
+  const hideMobileCapsule = isViewerOpen || (isImmersive && location.pathname !== '/timeline');
+  const showMobileCapsule = !hideMobileCapsule;
 
   const navItems = [
     { href: '/', icon: Home, label: '首页' },
@@ -52,28 +54,84 @@ export function Layout() {
         <Outlet />
       </main>
       
-      <nav className={cn(
-        "layout-nav md:hidden fixed bottom-8 left-1/2 -translate-x-1/2 z-40 transition-all duration-300",
-        hideNav && "translate-y-24 opacity-0 pointer-events-none"
-      )}>
-        <div className="flex items-center gap-2 p-2 rounded-full bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl ring-1 ring-white/5">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              to={item.href}
-              className={cn(
-                "relative flex items-center justify-center px-6 py-3 rounded-full transition-all duration-300",
-                location.pathname === item.href 
-                  ? "bg-white/10 text-foreground shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)]" 
-                  : "text-muted-foreground/60 hover:text-foreground hover:bg-white/5"
-              )}
-            >
-              <item.icon className={cn("h-5 w-5", location.pathname === item.href && "stroke-[2.5px]")} />
-              <span className="sr-only">{item.label}</span>
-            </Link>
-          ))}
-        </div>
-      </nav>
+      <AnimatePresence initial={false}>
+        {showMobileCapsule ? (
+          <motion.div
+            key="mobile-capsule"
+            initial={{ y: 24, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 24, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+            className="layout-nav md:hidden fixed left-0 right-0 bottom-8 z-40 px-3"
+          >
+            <div className="w-full flex justify-center">
+              <motion.div
+                layout
+                transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+                className="relative inline-flex items-center gap-2 max-w-[92vw] rounded-full bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl ring-1 ring-white/5 px-2.5 py-2"
+              >
+                <Link
+                  to="/"
+                  className={cn(
+                    "flex items-center justify-center h-10 w-10 rounded-full transition-colors",
+                    location.pathname === '/' 
+                      ? "bg-white/10 text-foreground shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)]" 
+                      : "text-white/70 hover:text-white hover:bg-white/5"
+                  )}
+                  aria-label="首页"
+                >
+                  <Home className={cn("h-5 w-5", location.pathname === '/' && "stroke-[2.5px]")} />
+                </Link>
+
+                <AnimatePresence mode="wait" initial={false}>
+                  {location.pathname === '/timeline' && timelineCapsule ? (
+                    <motion.div
+                      key="timeline-date"
+                      layout
+                      initial={{ opacity: 0, x: 8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -8 }}
+                      transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                      className="relative"
+                    >
+                      <BottomCapsuleDateTimeline
+                        embedded
+                        onDateSelect={timelineCapsule.onDateSelect}
+                        availableDates={timelineCapsule.availableDates}
+                        initialDate={timelineCapsule.initialDate}
+                        value={timelineCapsule.value}
+                        mode={timelineCapsule.mode}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="timeline-link"
+                      layout
+                      initial={{ opacity: 0, x: 8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -8 }}
+                      transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                    >
+                      <Link
+                        to="/timeline"
+                        className={cn(
+                          "flex items-center justify-center h-10 w-10 rounded-full transition-colors",
+                          location.pathname === '/timeline' 
+                            ? "bg-white/10 text-foreground shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)]" 
+                            : "text-white/70 hover:text-white hover:bg-white/5"
+                        )}
+                        aria-label="时间轴"
+                      >
+                        <Calendar className={cn("h-5 w-5", location.pathname === '/timeline' && "stroke-[2.5px]")} />
+                      </Link>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       <footer className="py-8 text-center text-sm text-muted-foreground pb-32 md:pb-8">
         <p>
