@@ -90,6 +90,9 @@ export default function AlbumPage() {
           photos={photos}
           initialIndex={viewerIndex}
           onClose={() => setViewerIndex(-1)}
+          onLoadMore={() => fetchNextPage()}
+          hasMore={hasNextPage}
+          loadingMore={isFetchingNextPage}
         />
       )}
     </div>

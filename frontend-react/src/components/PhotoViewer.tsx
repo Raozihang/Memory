@@ -18,9 +18,12 @@ interface PhotoViewerProps {
   photos: Photo[];
   initialIndex: number;
   onClose: () => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
 }
 
-export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps) {
+export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore, loadingMore }: PhotoViewerProps) {
   const { setViewerOpen } = useLayout();
   const [index, setIndex] = useState(initialIndex);
   const [showInfo, setShowInfo] = useState(false);
@@ -30,6 +33,8 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
   const [loadingOriginal, setLoadingOriginal] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [showWeChatTip, setShowWeChatTip] = useState(false);
+  const [showLastPhotoTip, setShowLastPhotoTip] = useState(false);
+  const [showLoadingTip, setShowLoadingTip] = useState(false);
   const [progress, setProgress] = useState(0);
   
   // 渐进式加载状态：先显示缩略图，再切换到大图
@@ -165,12 +170,34 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
   }, []);
 
   const handleNext = useCallback(() => {
-    setIndex(i => (i + 1) % photos.length);
-  }, [photos.length]);
+    if (index < photos.length - 1) {
+      setIndex(i => i + 1);
+    } else {
+      if (hasMore) {
+        if (!loadingMore) {
+          onLoadMore?.();
+        }
+        setShowLoadingTip(true);
+        setTimeout(() => setShowLoadingTip(false), 2000);
+      } else {
+        setShowLastPhotoTip(true);
+        setTimeout(() => setShowLastPhotoTip(false), 2000);
+      }
+    }
+  }, [photos.length, index, hasMore, loadingMore, onLoadMore]);
 
   const handlePrev = useCallback(() => {
-    setIndex(i => (i - 1 + photos.length) % photos.length);
-  }, [photos.length]);
+    if (index > 0) {
+      setIndex(i => i - 1);
+    }
+  }, [index]);
+
+  // Auto load more when close to end
+  useEffect(() => {
+    if (hasMore && !loadingMore && photos.length - 1 - index <= 3) {
+      onLoadMore?.();
+    }
+  }, [index, photos.length, hasMore, loadingMore, onLoadMore]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -189,14 +216,15 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
   });
 
   useEffect(() => {
-    if (photos.length > 1) {
-      const next = photos[(index + 1) % photos.length];
-      const prev = photos[(index - 1 + photos.length) % photos.length];
-      // 预加载相邻图片的 thumb
+    // Preload next/prev images
+    if (index < photos.length - 1) {
+      const next = photos[index + 1];
       new Image().src = api.getPhotoUrl(next, 'thumb');
-      new Image().src = api.getPhotoUrl(prev, 'thumb');
-      // 使用 imageCache 优先预加载相邻图片的 display 版本
       imageCache.priorityPreload(next.id, api.getPhotoUrl(next, 'display'));
+    }
+    if (index > 0) {
+      const prev = photos[index - 1];
+      new Image().src = api.getPhotoUrl(prev, 'thumb');
       imageCache.priorityPreload(prev.id, api.getPhotoUrl(prev, 'display'));
     }
   }, [index, photos]);
@@ -374,6 +402,25 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
         <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[60] animate-fade-in-out">
           <div className="rounded-xl bg-zinc-800/95 px-5 py-3 text-sm text-white shadow-lg border border-white/10 whitespace-nowrap">
             查看原图后长按保存
+          </div>
+        </div>
+      )}
+
+      {/* 加载更多提示 Toast */}
+      {showLoadingTip && (
+        <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[60] animate-fade-in-out">
+          <div className="rounded-xl bg-zinc-800/95 px-5 py-3 text-sm text-white shadow-lg border border-white/10 whitespace-nowrap flex items-center gap-2">
+            <Loader className="h-4 w-4 animate-spin" />
+            正在加载更多...
+          </div>
+        </div>
+      )}
+
+      {/* 最后一张提示 Toast */}
+      {showLastPhotoTip && (
+        <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[60] animate-fade-in-out">
+          <div className="rounded-xl bg-zinc-800/95 px-5 py-3 text-sm text-white shadow-lg border border-white/10 whitespace-nowrap">
+            已经是最后一张了
           </div>
         </div>
       )}
