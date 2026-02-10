@@ -1,7 +1,34 @@
 import { Photo, Album, AlbumWithCover, TimelineResponse, ExifData, PhotosPage } from './types';
 
-// CDN 域名，图片资源走 CDN 加速
-const CDN_BASE = 'https://memory.cdjxfls.com';
+type ImageUrlMode = 'api' | 'direct';
+
+function joinUrl(base: string, pathname: string) {
+  const trimmedBase = String(base || '').replace(/\/+$/, '');
+  const trimmedPath = String(pathname || '').replace(/^\/+/, '');
+  return `${trimmedBase}/${trimmedPath}`;
+}
+
+function normalizeCdnBase(base: string) {
+  let b = String(base || '').trim();
+  if (!b) return b;
+  if (b.startsWith('//')) b = `https:${b}`;
+  if (b.startsWith('http://')) b = `https://${b.slice('http://'.length)}`;
+  if (!/^https?:\/\//i.test(b)) b = `https://${b}`;
+  return b;
+}
+
+function encodeStorageKeyForPath(key: string) {
+  return String(key || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(seg => encodeURIComponent(seg))
+    .join('/');
+}
+
+const IMAGE_CDN_BASE = normalizeCdnBase((import.meta as any)?.env?.VITE_IMAGE_CDN_BASE || 'https://img.cdjxfls.com');
+const RAW_IMAGE_URL_MODE = String((import.meta as any)?.env?.VITE_IMAGE_URL_MODE || '').trim().toLowerCase();
+const IMAGE_URL_MODE: ImageUrlMode = RAW_IMAGE_URL_MODE === 'api' ? 'api' : 'direct';
+const FALLBACK_ORIGIN = typeof window !== 'undefined' ? window.location.origin : '';
 
 export const api = {
   getPhotos: async (): Promise<Photo[]> => {
@@ -38,14 +65,18 @@ export const api = {
     return res.json();
   },
   getImageUrl: (key: string) => {
-    return `${CDN_BASE}/api/files/${encodeURIComponent(key)}`;
+    const encoded = encodeStorageKeyForPath(key);
+    if (IMAGE_URL_MODE === 'direct') return joinUrl(IMAGE_CDN_BASE || FALLBACK_ORIGIN, encoded);
+    return joinUrl(IMAGE_CDN_BASE || FALLBACK_ORIGIN, `api/files/${encoded}`);
   },
   getPhotoUrl: (photo: Photo, size: 'thumb' | 'medium' | 'display' | 'original' = 'display') => {
     let key = photo.storage_key;
     if (size === 'thumb' && photo.thumb_key) key = photo.thumb_key;
     if (size === 'medium' && photo.medium_key) key = photo.medium_key;
     if (size === 'display' && photo.display_key) key = photo.display_key;
-    return `${CDN_BASE}/api/files/${encodeURIComponent(key)}`;
+    const encoded = encodeStorageKeyForPath(key);
+    if (IMAGE_URL_MODE === 'direct') return joinUrl(IMAGE_CDN_BASE || FALLBACK_ORIGIN, encoded);
+    return joinUrl(IMAGE_CDN_BASE || FALLBACK_ORIGIN, `api/files/${encoded}`);
   },
   createAlbum: async (title: string, description: string) => {
     const res = await fetch('/api/albums', {

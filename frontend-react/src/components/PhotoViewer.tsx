@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Photo } from '@/lib/types';
 import { api } from '@/lib/api';
 import { X, ChevronLeft, ChevronRight, Info, Download, Loader } from 'lucide-react';
@@ -28,16 +28,15 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
 
   const [viewOriginal, setViewOriginal] = useState(false);
   const [loadingOriginal, setLoadingOriginal] = useState(false);
-  const [loadProgress, setLoadProgress] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const [showWeChatTip, setShowWeChatTip] = useState(false);
+  const [progress, setProgress] = useState(0);
   
   // 渐进式加载状态：先显示缩略图，再切换到大图
   const [thumbLoaded, setThumbLoaded] = useState(false);
   const [displayLoaded, setDisplayLoaded] = useState(false);
   const [fallbackLevel, setFallbackLevel] = useState(0); // 0: display, 1: medium, 2: original
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   
   // 缓存微信环境检测结果
   const isWeChatEnv = useMemo(() => isWeChat(), []);
@@ -59,7 +58,30 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
   const shownSrc = viewOriginal ? originalUrl : previewUrl;
   
   // 判断是否显示加载中状态（缩略图和大图都没加载完）
-  const isLoading = !thumbLoaded && !displayLoaded;
+  const isLoading = (!thumbLoaded && !displayLoaded) || loadingOriginal;
+
+  // 模拟进度条逻辑
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (loadingOriginal) {
+      setProgress(0);
+      interval = setInterval(() => {
+        setProgress(prev => {
+          // 如果已经很高了，增加的幅度变小
+          if (prev >= 99) return prev;
+          // 前期快，后期慢
+          const increment = prev < 30 ? Math.random() * 15 : 
+                           prev < 60 ? Math.random() * 5 : 
+                           prev < 80 ? Math.random() * 2 : 
+                           Math.random() * 0.5;
+          return Math.min(99, Math.floor(prev + increment));
+        });
+      }, 200);
+    } else {
+      setProgress(100);
+    }
+    return () => clearInterval(interval);
+  }, [loadingOriginal]);
 
   useEffect(() => {
     // 打开 viewer 时隐藏胶囊导航
@@ -78,14 +100,8 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
   useEffect(() => {
     setViewOriginal(false);
     setLoadingOriginal(false);
-    setLoadProgress(0);
     setLoadError(false);
     setFallbackLevel(0); // 重置为默认 display 级别
-    // 取消之前的加载请求
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
     
     // 检查是否已有缓存的高清图
     const cachedQuality = imageCache.getLoadedQuality(photo.id);
@@ -120,101 +136,33 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
   // 大图加载完成
   const handleDisplayLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     setDisplayLoaded(true);
+    setLoadingOriginal(false);
+    setProgress(100);
     const img = e.currentTarget;
     // 用大图的实际尺寸更新，确保尺寸准确
     if (img.naturalWidth && img.naturalHeight) {
       setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
     }
     // 标记该图片已加载高清版本，供瀑布流复用
-    const quality = fallbackLevel === 0 ? 'display' : fallbackLevel === 1 ? 'medium' : 'original';
+    const quality = viewOriginal ? 'original' : fallbackLevel === 0 ? 'display' : fallbackLevel === 1 ? 'medium' : 'original';
     imageCache.markLoaded(photo.id, quality);
-  }, [photo.id, fallbackLevel]);
+  }, [photo.id, fallbackLevel, viewOriginal]);
 
-  const handleViewOriginal = useCallback(async () => {
-    // 取消之前的请求
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    
-    setLoadingOriginal(true);
-    setLoadProgress(0);
-    setLoadError(false);
-    
-    try {
-      // 使用 fetch 获取原图并显示进度
-      const response = await fetch(originalUrl, { signal: controller.signal });
-      
-      if (!response.ok) {
-        throw new Error('加载失败');
-      }
-      
-      const contentLength = response.headers.get('content-length');
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
-      
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('无法读取响应');
-      }
-      
-      let loaded = 0;
-      const chunks: Uint8Array[] = [];
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        chunks.push(value);
-        loaded += value.length;
-        
-        if (total > 0) {
-          // 有 Content-Length，显示百分比
-          const progress = Math.round((loaded / total) * 100);
-          setLoadProgress(progress);
-        } else {
-          // 没有 Content-Length，显示已加载大小（KB/MB）
-          setLoadProgress(loaded);
-        }
-      }
-      
-      // 合并 chunks 并创建 Blob URL 预加载图片
-      const combined = new Uint8Array(loaded);
-      let offset = 0;
-      for (const chunk of chunks) {
-        combined.set(chunk, offset);
-        offset += chunk.length;
-      }
-      const blob = new Blob([combined]);
-      const blobUrl = URL.createObjectURL(blob);
-      
-      const img = new Image();
-      img.src = blobUrl;
-      img.onload = () => {
-        URL.revokeObjectURL(blobUrl);
-        if (!controller.signal.aborted) {
-          setLoadingOriginal(false);
-          setViewOriginal(true);
-          // 标记原图已加载
-          imageCache.markLoaded(photo.id, 'original');
-        }
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(blobUrl);
-        if (!controller.signal.aborted) {
-          setLoadingOriginal(false);
-          setLoadError(true);
-        }
-      };
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return; // 请求被取消，不处理
-      }
+  const handleShownImageError = useCallback(() => {
+    if (viewOriginal) {
+      setViewOriginal(false);
       setLoadingOriginal(false);
       setLoadError(true);
+      return;
     }
-  }, [originalUrl, photo.id]);
+    handlePreviewError();
+  }, [handlePreviewError, viewOriginal]);
+
+  const handleViewOriginal = useCallback(() => {
+    setLoadingOriginal(true);
+    setLoadError(false);
+    setViewOriginal(true);
+  }, []);
 
   const handleNext = useCallback(() => {
     setIndex(i => (i + 1) % photos.length);
@@ -339,7 +287,7 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
               !isWeChatEnv && "select-none"
             )}
             onLoad={handleDisplayLoad}
-            onError={handlePreviewError}
+            onError={handleShownImageError}
             // 微信环境不阻止右键/长按菜单，允许分享和保存
             onContextMenu={isWeChatEnv ? undefined : (e) => e.preventDefault()}
             decoding="async"
@@ -353,12 +301,12 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
         </div>
       </div>
 
-      {!viewOriginal && (
+      {(!viewOriginal || loadingOriginal) && (
         <div className="absolute bottom-12 left-0 right-0 flex justify-center z-50 pointer-events-none">
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleViewOriginal();
+              if (!loadingOriginal) handleViewOriginal();
             }}
             disabled={loadingOriginal}
             className="pointer-events-auto flex items-center gap-2 rounded-full bg-zinc-800/80 px-6 py-2 text-sm font-medium text-white backdrop-blur-md active:scale-95 transition-all active:bg-zinc-700 shadow-lg border border-white/10"
@@ -366,11 +314,7 @@ export function PhotoViewer({ photos, initialIndex, onClose }: PhotoViewerProps)
             {loadingOriginal ? (
               <>
                 <Loader className="h-4 w-4 animate-spin text-white/80" />
-                <span className="text-white/90">
-                  {loadProgress > 100 
-                    ? `${(loadProgress / 1024 / 1024).toFixed(1)} MB` 
-                    : `${loadProgress}%`}
-                </span>
+                <span className="text-white/90">加载中 {progress}%</span>
               </>
             ) : loadError ? (
               <span className="text-red-400">加载失败，点击重试</span>

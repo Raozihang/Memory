@@ -4,7 +4,8 @@ const fs = require('fs')
 const type = process.env.STORAGE || 'local'
 let provider
 try {
-  if (type === 'oss') provider = require('./providers/oss')
+  if (type === 'cos') provider = require('./providers/cos')
+  else if (type === 'oss') provider = require('./providers/oss')
   else provider = require('./providers/local')
 } catch (e) {
   const base = path.join(__dirname, '..', 'storage')
@@ -31,16 +32,40 @@ try {
   }
 }
 
+function normalizeKey(key) {
+  return String(key || '').replace(/\\/g, '/')
+}
+
 module.exports = {
   type,
-  saveOriginal: provider.saveOriginal,
-  read: provider.read,
+  save(key, body, options) {
+    const normalizedKey = normalizeKey(key)
+    if (provider.save) return provider.save(normalizedKey, body, options)
+    const full = this.filePath(normalizedKey)
+    const dir = path.dirname(full)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(full, body)
+    return normalizedKey
+  },
+  saveOriginal(name, buffer) {
+    return provider.saveOriginal(name, buffer)
+  },
+  read(key) {
+    return provider.read(normalizeKey(key))
+  },
+  exists(key) {
+    const normalizedKey = normalizeKey(key)
+    if (provider.exists) return provider.exists(normalizedKey)
+    return Promise.resolve(fs.existsSync(this.filePath(normalizedKey)))
+  },
   getSignedUrl(key) {
-    if (provider.getSignedUrl) return provider.getSignedUrl(key)
-    return `/api/files/${encodeURIComponent(key)}`
+    const normalizedKey = normalizeKey(key)
+    if (provider.getSignedUrl) return provider.getSignedUrl(normalizedKey)
+    return `/api/files/${encodeURIComponent(normalizedKey)}`
   },
   filePath(key) {
-    if (provider.filePath) return provider.filePath(key)
-    return path.join(__dirname, '..', 'storage', key)
+    const normalizedKey = normalizeKey(key)
+    if (provider.filePath) return provider.filePath(normalizedKey)
+    return path.join(__dirname, '..', 'storage', normalizedKey)
   }
 }

@@ -58,6 +58,22 @@ function ensureDir(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
 }
 
+function listFilesRecursively(absDir, keyPrefix) {
+  const out = []
+  if (!fs.existsSync(absDir)) return out
+  const entries = fs.readdirSync(absDir, { withFileTypes: true })
+  for (const e of entries) {
+    const abs = path.join(absDir, e.name)
+    if (e.isDirectory()) {
+      out.push(...listFilesRecursively(abs, `${keyPrefix}/${e.name}`))
+      continue
+    }
+    if (!e.isFile()) continue
+    out.push({ key: `${keyPrefix}/${e.name}`, absPath: abs })
+  }
+  return out
+}
+
 async function init() {
   ensureDir(DATA_DIR)
   ensureDir(STORAGE_DIR)
@@ -97,14 +113,14 @@ async function processPendingUploads() {
         const id = Date.now().toString(36)
         const b64 = sample.dataUrl.split(',').pop()
         const buf = Buffer.from(b64, 'base64')
-        const originalKey = path.join('originals', `${id}-${sample.filename}`)
-        
-        storage.saveOriginal(`${id}-${sample.filename}`, buf)
+        const safeFilename = path.basename(sample.filename)
+        const originalKey = `originals/${id}-${safeFilename}`
+        await storage.saveOriginal(`${id}-${safeFilename}`, buf)
         
         const photo = {
           id,
           album_id: sample.albumId || 'demo',
-          filename: sample.filename,
+          filename: safeFilename,
           storage_key: originalKey,
           mime: 'image/png',
           bytes: buf.length,
@@ -113,29 +129,18 @@ async function processPendingUploads() {
         }
         
         await dao.addPhoto(photo)
-        
-        // Derivatives
-        const extMap = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }
-        const baseName = path.parse(sample.filename).name
-        
-        const saveVariant = async (dataUrl, type) => {
-          if (!dataUrl) return null
-          const mime = (dataUrl.split(';')[0].split(':')[1] || 'image/png')
-          const ext = extMap[mime] || '.png'
-          const key = path.join('derivatives', `${id}-${type}-${baseName}${ext}`)
-          
-          const b64Variant = dataUrl.split(',').pop()
-          const bufVariant = Buffer.from(b64Variant, 'base64')
-          fs.writeFileSync(path.join(STORAGE_DIR, key), bufVariant)
-          
-          await dao.addDerivative({ photo_id: id, type, storage_key: key })
-          return key
-        }
-        
-        await saveVariant(sample.displayDataUrl || sample.dataUrl, 'display')
-        await saveVariant(sample.mediumDataUrl || sample.dataUrl, 'medium')
-        await saveVariant(sample.thumbDataUrl || sample.dataUrl, 'thumb')
-        
+
+        await generateDerivatives(
+          id,
+          safeFilename,
+          originalKey,
+          buf,
+          sample.dataUrl,
+          sample.displayDataUrl,
+          sample.mediumDataUrl,
+          sample.thumbDataUrl
+        )
+
         await dao.saveExif(id, { taken_at: photo.taken_at })
       }
     }
@@ -274,7 +279,7 @@ function withDerivativeKeys(photo, dIndex) {
   }
 }
 
-async function generateDerivatives(id, filename, originalPath, dataUrl, displayDataUrl, mediumDataUrl, thumbDataUrl) {
+async function generateDerivatives(id, filename, originalPath, originalBuffer, dataUrl, displayDataUrl, mediumDataUrl, thumbDataUrl) {
   const extMap = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' }
   const baseName = path.parse(filename).name
   
@@ -282,11 +287,11 @@ async function generateDerivatives(id, filename, originalPath, dataUrl, displayD
     if (!dUrl) return null
     const mime = (dUrl.split(';')[0].split(':')[1] || 'image/jpeg')
     const ext = extMap[mime] || '.jpg'
-    const key = path.join('derivatives', `${id}-${type}-${baseName}${ext}`)
+    const key = `derivatives/${id}-${type}-${baseName}${ext}`
     
     const b64 = dUrl.split(',').pop()
     const buf = Buffer.from(b64, 'base64')
-    fs.writeFileSync(path.join(STORAGE_DIR, key), buf)
+    await storage.save(key, buf, { contentType: mime })
     
     await dao.addDerivative({ photo_id: id, type, storage_key: key })
     return key
@@ -304,30 +309,31 @@ async function generateDerivatives(id, filename, originalPath, dataUrl, displayD
 
   // 3. Generate with Sharp if available
   if (sharp) {
-    const fullOriginalPath = path.join(STORAGE_DIR, originalPath)
-    
     if (!keyDisplay) {
-      const k = path.join('derivatives', `${id}-display-${baseName}.webp`)
+      const k = `derivatives/${id}-display-${baseName}.webp`
       try {
-        await sharp(fullOriginalPath).resize(1600, 1600, { fit: 'inside' }).webp({ quality: 80 }).toFile(path.join(STORAGE_DIR, k))
+        const out = await sharp(originalBuffer).resize(1600, 1600, { fit: 'inside' }).webp({ quality: 80 }).toBuffer()
+        await storage.save(k, out, { contentType: 'image/webp' })
         await dao.addDerivative({ photo_id: id, type: 'display', storage_key: k })
         keyDisplay = k
       } catch (e) { console.error('Sharp error (display):', e) }
     }
     
     if (!keyMedium) {
-      const k = path.join('derivatives', `${id}-medium-${baseName}.webp`)
+      const k = `derivatives/${id}-medium-${baseName}.webp`
       try {
-        await sharp(fullOriginalPath).resize(800, 800, { fit: 'inside' }).webp({ quality: 70 }).toFile(path.join(STORAGE_DIR, k))
+        const out = await sharp(originalBuffer).resize(800, 800, { fit: 'inside' }).webp({ quality: 70 }).toBuffer()
+        await storage.save(k, out, { contentType: 'image/webp' })
         await dao.addDerivative({ photo_id: id, type: 'medium', storage_key: k })
         keyMedium = k
       } catch (e) { console.error('Sharp error (medium):', e) }
     }
     
     if (!keyThumb) {
-      const k = path.join('derivatives', `${id}-thumb-${baseName}.webp`)
+      const k = `derivatives/${id}-thumb-${baseName}.webp`
       try {
-        await sharp(fullOriginalPath).resize(320, 320, { fit: 'inside' }).webp({ quality: 60 }).toFile(path.join(STORAGE_DIR, k))
+        const out = await sharp(originalBuffer).resize(320, 320, { fit: 'inside' }).webp({ quality: 60 }).toBuffer()
+        await storage.save(k, out, { contentType: 'image/webp' })
         await dao.addDerivative({ photo_id: id, type: 'thumb', storage_key: k })
         keyThumb = k
       } catch (e) { console.error('Sharp error (thumb):', e) }
@@ -346,21 +352,100 @@ async function handleApiRequest(req, res, url) {
     })
   }
 
+  if ((req.method === 'POST' || req.method === 'GET') && url.pathname === '/api/storage/migrateToCos') {
+    if (req.method === 'GET' && url.searchParams.get('run') !== '1') {
+      return sendJson(res, { ok: false, error: 'use POST or add ?run=1 for GET' }, 400)
+    }
+
+    let cosProvider
+    try {
+      cosProvider = require('./storage/providers/cos')
+    } catch (e) {
+      const details = e && (e.stack || e.message || String(e))
+      return sendJson(
+        res,
+        {
+          error: 'cos sdk not installed',
+          details,
+          hint: '请确认在 server 目录执行过 npm install，并且运行的 Node 版本与依赖兼容（建议 Node 18/20 LTS）'
+        },
+        500
+      )
+    }
+
+    const dryRun = url.searchParams.get('dryRun') === '1'
+    const limitRaw = url.searchParams.get('limit')
+    const limit = limitRaw ? Math.max(1, Math.min(200000, Number(limitRaw) || 0)) : null
+
+    const originals = listFilesRecursively(path.join(STORAGE_DIR, 'originals'), 'originals')
+    const derivatives = listFilesRecursively(path.join(STORAGE_DIR, 'derivatives'), 'derivatives')
+    const all = originals.concat(derivatives)
+    const items = limit ? all.slice(0, limit) : all
+
+    let uploaded = 0
+    let skipped = 0
+    let failed = 0
+    const errors = []
+
+    const concurrency = Math.max(1, Math.min(10, Number(url.searchParams.get('concurrency') || 5)))
+    let cursor = 0
+
+    const worker = async () => {
+      while (true) {
+        const idx = cursor
+        cursor += 1
+        if (idx >= items.length) return
+
+        const it = items[idx]
+        try {
+          const exists = await cosProvider.exists(it.key)
+          if (exists) {
+            skipped += 1
+            continue
+          }
+
+          if (!dryRun) {
+            await cosProvider.save(it.key, fs.createReadStream(it.absPath))
+          }
+          uploaded += 1
+        } catch (e) {
+          failed += 1
+          if (errors.length < 50) {
+            errors.push({ key: it.key, message: String(e && (e.message || e)) })
+          }
+        }
+      }
+    }
+
+    const workers = Array.from({ length: concurrency }, () => worker())
+    await Promise.all(workers)
+
+    return sendJson(res, { ok: failed === 0, dryRun, total: items.length, uploaded, skipped, failed, errors })
+  }
+
   // 2. Serve Files (Originals/Derivatives)
   if (req.method === 'GET' && url.pathname.startsWith('/api/files/')) {
     const key = decodeURIComponent(url.pathname.replace('/api/files/', ''))
-    const file = path.join(STORAGE_DIR, key)
+    const localPath = path.join(STORAGE_DIR, key)
     
-    if (!fs.existsSync(file)) {
-      return sendJson(res, { error: 'not found' }, 404)
+    if (fs.existsSync(localPath)) {
+      const ext = path.extname(localPath).toLowerCase()
+      const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+                 : ext === '.png' ? 'image/png'
+                 : ext === '.webp' ? 'image/webp'
+                 : 'application/octet-stream'
+      return sendFile(localPath, mime, req, res)
     }
-    
-    const ext = path.extname(file).toLowerCase()
-    const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-               : ext === '.png' ? 'image/png'
-               : ext === '.webp' ? 'image/webp'
-               : 'application/octet-stream'
-    return sendFile(file, mime, req, res)
+
+    const signedUrl = storage.getSignedUrl(key)
+    if (typeof signedUrl === 'string' && /^https?:\/\//i.test(signedUrl)) {
+      res.statusCode = 302
+      res.setHeader('Location', signedUrl)
+      res.setHeader('Cache-Control', 'public, max-age=60')
+      return res.end()
+    }
+
+    return sendJson(res, { error: 'not found' }, 404)
   }
 
   // 3. List Photos
@@ -404,14 +489,15 @@ async function handleApiRequest(req, res, url) {
     // Save Original
     const b64 = dataUrl.split(',').pop()
     const buf = Buffer.from(b64, 'base64')
-    const originalKey = path.join('originals', `${id}-${filename}`)
-    storage.saveOriginal(`${id}-${filename}`, buf)
+    const safeFilename = path.basename(filename)
+    const originalKey = `originals/${id}-${safeFilename}`
+    await storage.saveOriginal(`${id}-${safeFilename}`, buf)
 
     // Update DB
     const photo = {
       id,
       album_id: albumId || 'demo',
-      filename,
+      filename: safeFilename,
       storage_key: originalKey,
       mime: 'image/jpeg',
       bytes: buf.length,
@@ -424,7 +510,7 @@ async function handleApiRequest(req, res, url) {
     await dao.saveExif(id, exif || { taken_at: photo.taken_at })
 
     // Generate Derivatives
-    await generateDerivatives(id, filename, originalKey, dataUrl, displayDataUrl, mediumDataUrl, thumbDataUrl)
+    await generateDerivatives(id, safeFilename, originalKey, buf, dataUrl, displayDataUrl, mediumDataUrl, thumbDataUrl)
 
     return sendJson(res, { id })
   }
@@ -519,9 +605,16 @@ async function handleApiRequest(req, res, url) {
     ensureDir(tmpDir)
     
     for (const p of albumPhotos) {
-      const src = path.join(STORAGE_DIR, p.storage_key)
       const dest = path.join(tmpDir, p.filename)
-      if (fs.existsSync(src)) fs.copyFileSync(src, dest)
+      const src = path.join(STORAGE_DIR, p.storage_key)
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest)
+        continue
+      }
+      try {
+        const buf = await storage.read(p.storage_key)
+        fs.writeFileSync(dest, buf)
+      } catch {}
     }
     
     try {
@@ -539,7 +632,18 @@ async function handleApiRequest(req, res, url) {
     const id = url.pathname.split('/')[3]
     const p = await dao.getPhoto(id)
     if (!p) return sendJson(res, { error: 'not found' }, 404)
-    return sendFile(path.join(STORAGE_DIR, p.storage_key), 'application/octet-stream', req, res)
+    const localPath = path.join(STORAGE_DIR, p.storage_key)
+    if (fs.existsSync(localPath)) {
+      return sendFile(localPath, 'application/octet-stream', req, res)
+    }
+    const signedUrl = storage.getSignedUrl(p.storage_key)
+    if (typeof signedUrl === 'string' && /^https?:\/\//i.test(signedUrl)) {
+      res.statusCode = 302
+      res.setHeader('Location', signedUrl)
+      res.setHeader('Cache-Control', 'public, max-age=60')
+      return res.end()
+    }
+    return sendJson(res, { error: 'not found' }, 404)
   }
 
   if (req.method === 'GET' && url.pathname.match(/^\/api\/photos\/([a-z0-9]+)\/downloadUrl$/)) {

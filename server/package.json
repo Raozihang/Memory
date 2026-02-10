@@ -10,6 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "cos-nodejs-sdk-v5": "^2.14.7",
     "dotenv": "^17.2.3",
     "mysql2": "^3.15.3",
     "sharp": "^0.34.5"

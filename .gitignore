@@ -13,7 +13,7 @@ build/
 # IDE
 .vscode/
 .idea/
-
+.qoder
 # OS files
 .DS_Store
 Thumbs.db
