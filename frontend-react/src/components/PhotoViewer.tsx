@@ -297,16 +297,11 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
           centerOnInit={true}
         >
           <TransformComponent
-            wrapperClass="!w-full !h-full flex items-center justify-center"
-            contentClass="flex items-center justify-center"
+            wrapperClass="!w-full !h-full"
+            contentClass="!w-full !h-full flex items-center justify-center"
           >
             <div 
-              className="relative flex items-center justify-center"
-              style={imageDimensions ? {
-                maxWidth: '100%',
-                maxHeight: '100%',
-                aspectRatio: `${imageDimensions.width} / ${imageDimensions.height}`
-              } : { width: '100%', height: '100%' }}
+              className="relative flex items-center justify-center w-full h-full"
             >
               {/* 缩略图作为占位 - 先显示，大图加载完成后切换 */}
               {!displayLoaded && !viewOriginal && (
@@ -314,7 +309,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
                   src={thumbUrl}
                   alt=""
                   className={cn(
-                    "absolute inset-0 w-full h-full rounded-lg object-contain transition-opacity duration-200",
+                    "absolute inset-0 w-full h-full object-contain transition-opacity duration-200",
                     thumbLoaded ? "opacity-100" : "opacity-0"
                   )}
                   onLoad={handleThumbLoad}
@@ -327,7 +322,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
                 src={shownSrc}
                 alt={photo.filename}
                 className={cn(
-                  "w-full h-full rounded-lg object-contain shadow-2xl transition-opacity duration-300",
+                  "w-full h-full object-contain shadow-2xl transition-opacity duration-300",
                   displayLoaded || viewOriginal ? "opacity-100" : "opacity-0",
                   // 微信环境允许长按操作，非微信环境禁止选择
                   !isWeChatEnv && "select-none"
