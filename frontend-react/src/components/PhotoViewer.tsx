@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Photo } from '@/lib/types';
 import { api } from '@/lib/api';
 import { X, ChevronLeft, ChevronRight, Info, Download, Loader } from 'lucide-react';
@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { useLayout } from '@/lib/LayoutContext';
 import { imageCache } from '@/lib/imageCache';
+import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 
 // 检测是否为微信环境
 const isWeChat = () => {
@@ -42,6 +43,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
   const [displayLoaded, setDisplayLoaded] = useState(false);
   const [fallbackLevel, setFallbackLevel] = useState(0); // 0: display, 1: medium, 2: original
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const transformComponentRef = useRef<ReactZoomPanPinchRef>(null);
   
   // 缓存微信环境检测结果
   const isWeChatEnv = useMemo(() => isWeChat(), []);
@@ -118,6 +120,11 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
       setThumbLoaded(false);
       setDisplayLoaded(false);
       setImageDimensions(null);
+    }
+    
+    // Reset zoom when changing photos
+    if (transformComponentRef.current) {
+      transformComponentRef.current.resetTransform();
     }
   }, [index, photo.id]);
 
@@ -282,51 +289,64 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
       </button>
 
       <div className="flex h-full w-full items-center justify-center p-4">
-        <div 
-          className="relative flex items-center justify-center pointer-events-none"
-          style={imageDimensions ? {
-            maxWidth: '100%',
-            maxHeight: '100%',
-            aspectRatio: `${imageDimensions.width} / ${imageDimensions.height}`
-          } : { width: '100%', height: '100%' }}
+        <TransformWrapper
+          ref={transformComponentRef}
+          initialScale={1}
+          minScale={0.5}
+          maxScale={8}
+          centerOnInit={true}
         >
-          {/* 缩略图作为占位 - 先显示，大图加载完成后切换 */}
-          {!displayLoaded && !viewOriginal && (
-            <img
-              src={thumbUrl}
-              alt=""
-              className={cn(
-                "absolute inset-0 w-full h-full rounded-lg object-contain transition-opacity duration-200",
-                thumbLoaded ? "opacity-100" : "opacity-0"
+          <TransformComponent
+            wrapperClass="!w-full !h-full flex items-center justify-center"
+            contentClass="flex items-center justify-center"
+          >
+            <div 
+              className="relative flex items-center justify-center"
+              style={imageDimensions ? {
+                maxWidth: '100%',
+                maxHeight: '100%',
+                aspectRatio: `${imageDimensions.width} / ${imageDimensions.height}`
+              } : { width: '100%', height: '100%' }}
+            >
+              {/* 缩略图作为占位 - 先显示，大图加载完成后切换 */}
+              {!displayLoaded && !viewOriginal && (
+                <img
+                  src={thumbUrl}
+                  alt=""
+                  className={cn(
+                    "absolute inset-0 w-full h-full rounded-lg object-contain transition-opacity duration-200",
+                    thumbLoaded ? "opacity-100" : "opacity-0"
+                  )}
+                  onLoad={handleThumbLoad}
+                  decoding="async"
+                />
               )}
-              onLoad={handleThumbLoad}
-              decoding="async"
-            />
-          )}
-          
-          {/* 大图 - 加载完成后显示 */}
-          <img
-            src={shownSrc}
-            alt={photo.filename}
-            className={cn(
-              "w-full h-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 pointer-events-auto",
-              displayLoaded || viewOriginal ? "opacity-100" : "opacity-0",
-              // 微信环境允许长按操作，非微信环境禁止选择
-              !isWeChatEnv && "select-none"
-            )}
-            onLoad={handleDisplayLoad}
-            onError={handleShownImageError}
-            // 微信环境不阻止右键/长按菜单，允许分享和保存
-            onContextMenu={isWeChatEnv ? undefined : (e) => e.preventDefault()}
-            decoding="async"
-          />
+              
+              {/* 大图 - 加载完成后显示 */}
+              <img
+                src={shownSrc}
+                alt={photo.filename}
+                className={cn(
+                  "w-full h-full rounded-lg object-contain shadow-2xl transition-opacity duration-300",
+                  displayLoaded || viewOriginal ? "opacity-100" : "opacity-0",
+                  // 微信环境允许长按操作，非微信环境禁止选择
+                  !isWeChatEnv && "select-none"
+                )}
+                onLoad={handleDisplayLoad}
+                onError={handleShownImageError}
+                // 微信环境不阻止右键/长按菜单，允许分享和保存
+                onContextMenu={isWeChatEnv ? undefined : (e) => e.preventDefault()}
+                decoding="async"
+              />
 
-          {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Loader className="h-6 w-6 animate-spin text-white/70" />
+              {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Loader className="h-6 w-6 animate-spin text-white/70" />
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </TransformComponent>
+        </TransformWrapper>
       </div>
 
       {(!viewOriginal || loadingOriginal) && (
