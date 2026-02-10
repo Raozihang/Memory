@@ -2,12 +2,13 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Photo } from '@/lib/types';
 import { api } from '@/lib/api';
-import { X, ChevronLeft, ChevronRight, Info, Download, Loader } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Info, Download, Loader, ZoomOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { useLayout } from '@/lib/LayoutContext';
 import { imageCache } from '@/lib/imageCache';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
+import { motion, AnimatePresence, PanInfo } from 'framer-motion';
 
 // 检测是否为微信环境
 const isWeChat = () => {
@@ -27,6 +28,7 @@ interface PhotoViewerProps {
 export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore, loadingMore }: PhotoViewerProps) {
   const { setViewerOpen } = useLayout();
   const [index, setIndex] = useState(initialIndex);
+  const [direction, setDirection] = useState(0);
   const [showInfo, setShowInfo] = useState(false);
   const photo = photos[index];
 
@@ -44,6 +46,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
   const [fallbackLevel, setFallbackLevel] = useState(0); // 0: display, 1: medium, 2: original
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const transformComponentRef = useRef<ReactZoomPanPinchRef>(null);
+  const [isZoomed, setIsZoomed] = useState(false);
   
   // 缓存微信环境检测结果
   const isWeChatEnv = useMemo(() => isWeChat(), []);
@@ -178,6 +181,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
 
   const handleNext = useCallback(() => {
     if (index < photos.length - 1) {
+      setDirection(1);
       setIndex(i => i + 1);
     } else {
       if (hasMore) {
@@ -195,6 +199,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
 
   const handlePrev = useCallback(() => {
     if (index > 0) {
+      setDirection(-1);
       setIndex(i => i - 1);
     }
   }, [index]);
@@ -235,6 +240,25 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
       imageCache.priorityPreload(prev.id, api.getPhotoUrl(prev, 'display'));
     }
   }, [index, photos]);
+
+  const isMultiTouchRef = useRef(false);
+
+  const handleDragEnd = (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    // 如果检测到多指操作（如缩放），则忽略拖拽翻页
+    if (isMultiTouchRef.current) {
+      isMultiTouchRef.current = false;
+      return;
+    }
+
+    const SWIPE_THRESHOLD = 50;
+    const { offset } = info;
+
+    if (offset.x < -SWIPE_THRESHOLD) {
+      handleNext();
+    } else if (offset.x > SWIPE_THRESHOLD) {
+      handlePrev();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm">
@@ -289,62 +313,111 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
       </button>
 
       <div className="flex h-full w-full items-center justify-center p-4">
-        <TransformWrapper
-          ref={transformComponentRef}
-          initialScale={1}
-          minScale={0.5}
-          maxScale={8}
-          centerOnInit={true}
-        >
-          <TransformComponent
-            wrapperClass="!w-full !h-full"
-            contentClass="!w-full !h-full flex items-center justify-center"
-          >
-            <div 
-              className="relative flex items-center justify-center w-full h-full"
-            >
-              {/* 缩略图作为占位 - 先显示，大图加载完成后切换 */}
-              {!displayLoaded && !viewOriginal && (
-                <img
-                  src={thumbUrl}
-                  alt=""
-                  className={cn(
-                    "absolute inset-0 w-full h-full object-contain transition-opacity duration-200",
-                    thumbLoaded ? "opacity-100" : "opacity-0"
+        <AnimatePresence initial={false} custom={direction}>
+          <motion.div
+            key={index}
+            custom={direction}
+            variants={{
+              enter: (direction: number) => ({
+                x: direction > 0 ? 1000 : -1000,
+                opacity: 0
+              }),
+              center: {
+                zIndex: 1,
+                x: 0,
+                opacity: 1
+              },
+              exit: (direction: number) => ({
+                zIndex: 0,
+                x: direction < 0 ? 1000 : -1000,
+                opacity: 0
+              })
+            }}
+            initial="enter"
+             animate="center"
+             exit="exit"
+             transition={{
+               x: { type: "spring", stiffness: 300, damping: 30 },
+               opacity: { duration: 0.2 }
+             }}
+             drag={!isZoomed ? "x" : false}
+             dragConstraints={{ left: 0, right: 0 }}
+             dragElastic={0.2}
+             onDragEnd={handleDragEnd}
+             onTouchStart={(e) => {
+               if (e.touches.length > 1) {
+                 isMultiTouchRef.current = true;
+               } else {
+                 isMultiTouchRef.current = false;
+               }
+             }}
+             className="absolute inset-0 flex items-center justify-center p-4 touch-none"
+           >
+             <TransformWrapper
+                ref={transformComponentRef}
+                initialScale={1}
+                minScale={0.5}
+                maxScale={8}
+                centerOnInit={true}
+                onTransformed={(e) => setIsZoomed(e.state.scale > 1.01)}
+                doubleClick={{
+                  disabled: false,
+                  mode: "reset",
+                  step: 3 // Double click to zoom in 3x
+                }}
+                panning={{ disabled: !isZoomed }}
+              >
+                <TransformComponent
+                  wrapperClass="!w-full !h-full"
+                contentClass="!w-full !h-full flex items-center justify-center"
+              >
+                <div 
+                  className="relative flex items-center justify-center w-full h-full"
+                >
+                  {/* 缩略图作为占位 - 先显示，大图加载完成后切换 */}
+                  {!displayLoaded && !viewOriginal && (
+                    <img
+                      src={thumbUrl}
+                      alt=""
+                      className={cn(
+                        "absolute inset-0 w-full h-full object-contain transition-opacity duration-200",
+                        thumbLoaded ? "opacity-100" : "opacity-0"
+                      )}
+                      onLoad={handleThumbLoad}
+                      decoding="async"
+                    />
                   )}
-                  onLoad={handleThumbLoad}
-                  decoding="async"
-                />
-              )}
-              
-              {/* 大图 - 加载完成后显示 */}
-              <img
-                src={shownSrc}
-                alt={photo.filename}
-                className={cn(
-                  "w-full h-full object-contain shadow-2xl transition-opacity duration-300",
-                  displayLoaded || viewOriginal ? "opacity-100" : "opacity-0",
-                  // 微信环境允许长按操作，非微信环境禁止选择
-                  !isWeChatEnv && "select-none"
-                )}
-                onLoad={handleDisplayLoad}
-                onError={handleShownImageError}
-                // 微信环境不阻止右键/长按菜单，允许分享和保存
-                onContextMenu={isWeChatEnv ? undefined : (e) => e.preventDefault()}
-                decoding="async"
-              />
+                  
+                  {/* 大图 - 加载完成后显示 */}
+                  <img
+                    src={shownSrc}
+                    alt={photo.filename}
+                    className={cn(
+                      "w-full h-full object-contain shadow-2xl transition-opacity duration-300",
+                      displayLoaded || viewOriginal ? "opacity-100" : "opacity-0",
+                      // 微信环境允许长按操作，非微信环境禁止选择
+                      !isWeChatEnv && "select-none"
+                    )}
+                    onLoad={handleDisplayLoad}
+                    onError={handleShownImageError}
+                    // 微信环境不阻止右键/长按菜单，允许分享和保存
+                    onContextMenu={isWeChatEnv ? undefined : (e) => e.preventDefault()}
+                    decoding="async"
+                  />
 
-              {isLoading && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Loader className="h-6 w-6 animate-spin text-white/70" />
+                  {isLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Loader className="h-6 w-6 animate-spin text-white/70" />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </TransformComponent>
-        </TransformWrapper>
+              </TransformComponent>
+            </TransformWrapper>
+          </motion.div>
+        </AnimatePresence>
       </div>
 
-      {(!viewOriginal || loadingOriginal) && (
+      {(!viewOriginal || loadingOriginal) && !isZoomed && (
         <div className="absolute bottom-12 left-0 right-0 flex justify-center z-50 pointer-events-none">
           <button
             onClick={(e) => {
@@ -364,6 +437,22 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
             ) : (
               <span>查看原图</span>
             )}
+          </button>
+        </div>
+      )}
+
+      {isZoomed && (
+        <div className="absolute bottom-12 left-0 right-0 flex justify-center z-50 pointer-events-none">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              transformComponentRef.current?.resetTransform();
+              setIsZoomed(false);
+            }}
+            className="pointer-events-auto flex items-center gap-2 rounded-full bg-zinc-800/80 px-6 py-2 text-sm font-medium text-white backdrop-blur-md active:scale-95 transition-all active:bg-zinc-700 shadow-lg border border-white/10"
+          >
+            <ZoomOut className="h-4 w-4 text-white/90" />
+            <span>恢复大小</span>
           </button>
         </div>
       )}
