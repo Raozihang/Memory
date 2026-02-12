@@ -1,0 +1,345 @@
+openapi: 3.0.0
+info:
+  title: Album API
+  description: API for the Album photo management system
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  storage_mode:
+                    type: string
+                    enum: [mysql, json]
+
+  /api/files/{key}:
+    get:
+      summary: Serve a file (original or derivative)
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          description: URL-encoded storage key
+      responses:
+        '200':
+          description: File content
+        '404':
+          description: File not found
+
+  /api/photos:
+    get:
+      summary: List photos
+      parameters:
+        - name: albumId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: startTakenAt
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endTakenAt
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: List of photos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Photo'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  hasMore:
+                    type: boolean
+    post:
+      summary: Upload a photo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dataUrl, filename]
+              properties:
+                albumId:
+                  type: string
+                filename:
+                  type: string
+                dataUrl:
+                  type: string
+                  description: Base64 data URL
+                taken_at:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Photo uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+
+  /api/photos/{id}/download:
+    get:
+      summary: Download original photo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Binary file stream
+        '404':
+          description: Photo not found
+
+  /api/photos/{id}/exif:
+    get:
+      summary: Get photo EXIF data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: EXIF data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo_id:
+                    type: string
+                  exif_json:
+                    type: object
+
+  /api/timeline:
+    get:
+      summary: Get photo counts by date
+      responses:
+        '200':
+          description: Timeline data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  days:
+                    type: object
+                    additionalProperties:
+                      type: integer
+
+  /api/albums:
+    get:
+      summary: List albums
+      parameters:
+        - name: includeCover
+          in: query
+          schema:
+            type: string
+            enum: ['0', '1']
+      responses:
+        '200':
+          description: List of albums
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Album'
+    post:
+      summary: Create an album
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Album created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+
+  /api/albums/{id}:
+    put:
+      summary: Update album
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                cover_photo_id:
+                  type: string
+      responses:
+        '200':
+          description: Updated album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Album'
+
+  /api/albums/{id}/photos:
+    post:
+      summary: Add photo to album (link)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photo_id]
+              properties:
+                photo_id:
+                  type: string
+                ordering:
+                  type: integer
+      responses:
+        '200':
+          description: Success
+
+  /api/shares:
+    post:
+      summary: Create a share link
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_type, subject_id]
+              properties:
+                subject_type:
+                  type: string
+                  enum: [album, photo]
+                subject_id:
+                  type: string
+                expires_at:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Share created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                  url:
+                    type: string
+
+components:
+  schemas:
+    Photo:
+      type: object
+      properties:
+        id:
+          type: string
+        album_id:
+          type: string
+        filename:
+          type: string
+        storage_key:
+          type: string
+        mime:
+          type: string
+        bytes:
+          type: integer
+        taken_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        display_key:
+          type: string
+        thumb_key:
+          type: string
+        medium_key:
+          type: string
+
+    Album:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        cover_photo_id:
+          type: string
+        cover_photo:
+          $ref: '#/components/schemas/Photo'

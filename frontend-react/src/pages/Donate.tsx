@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { MouseEvent } from 'react';
+import { SEO } from '@/components/SEO';
 
 export default function DonatePage() {
   const wechatRemark = '#付款:饶zi(RZH_rao)/捐赠/002';
@@ -18,6 +19,7 @@ export default function DonatePage() {
 
   return (
     <div className="mx-auto max-w-3xl py-10">
+      <SEO title="捐赠" description="支持我们的网站运维" />
       <h1 className="mb-4 text-3xl font-bold tracking-tight">捐赠</h1>
       <p className="mb-6 text-muted-foreground leading-relaxed">
         感谢您对嘉祥记忆回廊的支持。您的捐赠将只用于网站运维、服务器资源购置以及后续功能迭代，

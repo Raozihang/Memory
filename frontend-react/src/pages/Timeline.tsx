@@ -7,6 +7,7 @@ import { DraggableDateTimeline } from '@/components/DraggableDateTimeline';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLayout } from '@/lib/LayoutContext';
 import { cn } from '@/lib/utils';
+import { SEO } from '@/components/SEO';
 
 type TimelineMode = 'day' | 'hour';
 
@@ -21,6 +22,7 @@ export default function Timeline() {
     queryKey: ['photos', { scope: 'timeline', mode: 'all' }],
     queryFn: api.getPhotos
   });
+  
   const [mode, setMode] = useState<TimelineMode>('hour');
   const [viewerIndex, setViewerIndex] = useState<number>(-1);
   const [viewerPhotos, setViewerPhotos] = useState<Photo[]>([]);
@@ -197,7 +199,12 @@ export default function Timeline() {
   }, [activeDate, availableDates, handleDateSelect, initialDate, mode, setTimelineCapsule]);
 
   return (
-    <div className="mx-auto max-w-6xl pb-40 md:pb-0">
+    <>
+      <SEO 
+        title="时间轴" 
+        description="按时间顺序回顾所有美好的瞬间" 
+      />
+      <div className="mx-auto max-w-6xl pb-40 md:pb-0">
       <div className={cn(
         "mb-8 sticky top-16 z-30 bg-background/95 backdrop-blur pb-4 pt-4 -mt-4 transition-all duration-300",
         isImmersive && "top-0"
@@ -292,5 +299,6 @@ export default function Timeline() {
         />
       )}
     </div>
+    </>
   );
 }

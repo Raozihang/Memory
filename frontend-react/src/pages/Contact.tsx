@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
+import { SEO } from '@/components/SEO';
 
 export default function ContactPage() {
   return (
     <div className="mx-auto max-w-3xl py-10">
+      <SEO title="联系我们" description="反馈问题或联系我们" />
       <h1 className="mb-4 text-3xl font-bold tracking-tight">联系我们</h1>
       <p className="mb-4 text-muted-foreground leading-relaxed">
         如有关于网站 BUG 反馈、希望新增功能、下架侵权照片或其它问题的反馈，欢迎与我们联系。

@@ -5,6 +5,7 @@ import { PhotoViewer } from '@/components/PhotoViewer';
 import { MasonryPhotoGrid } from '@/components/MasonryPhotoGrid';
 import { useState, useEffect, useMemo } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { SEO } from '@/components/SEO';
 
 export default function AlbumPage() {
   const { id } = useParams<{ id: string }>();
@@ -44,16 +45,33 @@ export default function AlbumPage() {
   }, [photosPages]);
 
   const { data: albums = [] } = useQuery({ 
-    queryKey: ['albums'], 
-    queryFn: api.getAlbums 
+    queryKey: ['albumsWithCovers'], 
+    queryFn: api.getAlbumsWithCovers 
   });
 
   const album = albums.find(a => a.id === id);
 
   if (!album && albums.length > 0) return <div>Album not found</div>;
 
+  const coverUrl = album?.cover_photo ? api.getPhotoUrl(album.cover_photo, 'medium') : undefined;
+
+  const jsonLd = album ? {
+    "@context": "https://schema.org",
+    "@type": "ImageGallery",
+    "name": album.title,
+    "description": album.description,
+    "url": window.location.href,
+    "image": photos.slice(0, 3).map(p => api.getPhotoUrl(p, 'medium'))
+  } : undefined;
+
   return (
     <div className="min-h-screen">
+      <SEO 
+        title={album?.title} 
+        description={album?.description || `查看 ${album?.title || '相册'} 中的照片`}
+        image={coverUrl}
+        jsonLd={jsonLd}
+      />
       <div className="mb-8 flex items-center gap-4">
         <button 
           onClick={() => navigate('/')}

@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { api } from '@/lib/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { generateVariants, extractExif } from '@/lib/image-utils';
-import { Loader2, UploadCloud, Plus, CheckCircle2, XCircle } from 'lucide-react';
+import { Loader2, UploadCloud, Plus, CheckCircle2, XCircle, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Simple client-side password protection
+const UPLOAD_PASSWORD = 'jx2024';
 
 export default function UploadPage() {
   const queryClient = useQueryClient();
@@ -18,6 +21,61 @@ export default function UploadPage() {
   const [newAlbumTitle, setNewAlbumTitle] = useState('');
   const [newAlbumDesc, setNewAlbumDesc] = useState('');
   const [creatingAlbum, setCreatingAlbum] = useState(false);
+
+  const [password, setPassword] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState(false);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password === UPLOAD_PASSWORD) {
+      setIsAuthenticated(true);
+      setAuthError(false);
+    } else {
+      setAuthError(true);
+    }
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-6 rounded-2xl border border-border/60 bg-card p-8 shadow-lg">
+          <div className="flex flex-col items-center space-y-2 text-center">
+            <div className="rounded-full bg-secondary p-3">
+              <Lock className="h-6 w-6 text-primary" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight">访问受限</h1>
+            <p className="text-sm text-muted-foreground">请输入密码以继续上传照片</p>
+          </div>
+          
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-2">
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setAuthError(false);
+                }}
+                placeholder="请输入访问密码"
+                className={cn(
+                  "flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                  authError ? "border-red-500 focus-visible:ring-red-500" : "border-input"
+                )}
+              />
+              {authError && <p className="text-xs text-red-500">密码错误，请重试</p>}
+            </div>
+            <button
+              type="submit"
+              className="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+            >
+              验证
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   const handleCreateAlbum = async () => {
     if (!newAlbumTitle.trim()) return;
@@ -98,18 +156,17 @@ export default function UploadPage() {
       if(fileInput) fileInput.value = '';
       
       queryClient.invalidateQueries({ queryKey: ['photos'] });
-      queryClient.invalidateQueries({ queryKey: ['albumsWithCovers'] });
-      queryClient.invalidateQueries({ queryKey: ['albums'] });
-    } catch (e) {
-      console.error(e);
-      setStatus('上传过程中发生错误');
+    } catch (error) {
+      console.error(error);
+      setStatus('上传出错，请重试');
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <>
+      <div className="mx-auto max-w-2xl py-10">
       <h1 className="mb-8 text-3xl font-bold">上传照片</h1>
 
       <div className="mb-8 rounded-xl bg-card p-6 shadow-lg border border-border">
@@ -222,6 +279,7 @@ export default function UploadPage() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

@@ -3,12 +3,27 @@ import { Link } from 'react-router-dom';
 import { Coffee } from 'lucide-react';
 import { api } from '@/lib/api';
 import { AlbumCard } from '@/components/AlbumCard';
+import { SEO } from '@/components/SEO';
 
 export default function Home() {
   const { data: albums = [], isLoading: albumsLoading } = useQuery({ queryKey: ['albumsWithCovers'], queryFn: api.getAlbumsWithCovers });
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "嘉祥记忆回廊 JX Memory",
+    "url": "https://memory.cdjxfls.com",
+    "description": "记录嘉祥高2024级的美好回忆",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "https://memory.cdjxfls.com/search?q={search_term_string}",
+      "query-input": "required name=search_term_string"
+    }
+  };
+
   return (
     <>
+      <SEO jsonLd={jsonLd} />
       <div className="relative z-10 mx-auto max-w-6xl">
         <div className="mb-12 mt-20 text-center">
           <h1 className="text-4xl font-bold tracking-tighter sm:text-5xl md:text-6xl lg:text-7xl">

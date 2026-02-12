@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { HelmetProvider } from 'react-helmet-async';
 import { Layout } from './components/Layout';
 import { LayoutProvider } from './lib/LayoutContext';
 import { WelcomeModal } from './components/WelcomeModal';
@@ -21,9 +22,10 @@ const queryClient = new QueryClient({
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <LayoutProvider>
-      <WelcomeModal />
+    <HelmetProvider>
+      <QueryClientProvider client={queryClient}>
+        <LayoutProvider>
+        <WelcomeModal />
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
@@ -36,8 +38,9 @@ function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-      </LayoutProvider>
-    </QueryClientProvider>
+        </LayoutProvider>
+      </QueryClientProvider>
+    </HelmetProvider>
   );
 }
 
