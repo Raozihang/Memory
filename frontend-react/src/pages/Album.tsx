@@ -7,29 +7,24 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { ArrowLeft, Download, Loader } from 'lucide-react';
 import { SEO } from '@/components/SEO';
 import { InternalLink } from '@/components/InternalLink';
+import { GridDensityToggle } from '@/components/GridDensityToggle';
+import { useResponsivePhotoColumns, useStoredGridDensity } from '@/lib/gridDensity';
 
 export default function AlbumPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [viewerIndex, setViewerIndex] = useState<number>(-1);
-  const [columnWidth, setColumnWidth] = useState(280);
+  const [gridDensity, setGridDensity] = useStoredGridDensity('less');
+  const gridColumns = useResponsivePhotoColumns(gridDensity);
   const [exporting, setExporting] = useState(false);
+  const [downloadingSeparately, setDownloadingSeparately] = useState(false);
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const requestedPhotoId = searchParams.get('photo') || searchParams.get('photoId');
 
-  // Responsive column width for masonry
-  useEffect(() => {
-    const updateWidth = () => {
-      const w = window.innerWidth;
-      if (w < 640) setColumnWidth(150); // Mobile: 2 columns
-      else if (w < 1024) setColumnWidth(200); // Tablet: 3 columns
-      else setColumnWidth(260); // Desktop: 4+ columns
-    };
-    updateWidth();
-    window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
+  const pageSize = useMemo(() => {
+    if (typeof window === 'undefined') return 80;
+    return window.innerWidth < 640 ? 40 : 80;
   }, []);
-
-  const pageSize = 80;
   const {
     data: photosPages,
     fetchNextPage,
@@ -72,8 +67,11 @@ export default function AlbumPage() {
     link.remove();
   };
 
-  const handleBatchDownload = async () => {
+  const downloadBusy = exporting || downloadingSeparately;
+
+  const handleZipDownload = async () => {
     if (!id || exporting) return;
+    setDownloadMenuOpen(false);
     setExporting(true);
     try {
       const result = await api.exportAlbum(id);
@@ -83,6 +81,30 @@ export default function AlbumPage() {
       alert('批量下载准备失败，请稍后重试');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleSeparateDownload = async () => {
+    if (!id || downloadingSeparately) return;
+    setDownloadMenuOpen(false);
+    setDownloadingSeparately(true);
+    try {
+      const result = await api.getAlbumDownloadUrls(id);
+      if (!result.files.length) {
+        alert('当前相册没有可下载的照片');
+        return;
+      }
+
+      result.files.forEach((file, index) => {
+        window.setTimeout(() => {
+          startDownload(file.url, file.filename);
+        }, index * 250);
+      });
+    } catch (error) {
+      console.error(error);
+      alert('下载链接准备失败，请稍后重试');
+    } finally {
+      setDownloadingSeparately(false);
     }
   };
 
@@ -139,7 +161,7 @@ export default function AlbumPage() {
         image="/logo.png"
         jsonLd={jsonLd}
       />
-      <div className="mb-8 flex items-center gap-4">
+      <div className="mb-8 flex flex-wrap items-center gap-4">
         <InternalLink
           to="/"
           className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary/50 hover:bg-secondary"
@@ -150,19 +172,40 @@ export default function AlbumPage() {
           <h1 className="truncate text-3xl font-bold">{album?.title || 'Loading...'}</h1>
           <p className="truncate text-muted-foreground">{album?.description}</p>
         </div>
-        <button
-          onClick={handleBatchDownload}
-          disabled={exporting || photos.length === 0}
-          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-secondary/70 px-4 text-sm font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {exporting ? <Loader className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          <span className="hidden sm:inline">{exporting ? '正在打包' : '批量下载'}</span>
-        </button>
+        <GridDensityToggle value={gridDensity} onChange={setGridDensity} className="shrink-0" />
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setDownloadMenuOpen(open => !open)}
+            disabled={downloadBusy || photos.length === 0}
+            className="inline-flex h-10 items-center gap-2 rounded-full bg-secondary/70 px-4 text-sm font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {downloadBusy ? <Loader className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            <span className="hidden sm:inline">
+              {exporting ? '正在打包' : downloadingSeparately ? '正在下载' : '批量下载'}
+            </span>
+          </button>
+          {downloadMenuOpen && (
+            <div className="absolute right-0 top-12 z-30 w-44 overflow-hidden rounded-lg border border-border bg-popover text-sm shadow-xl">
+              <button
+                onClick={handleSeparateDownload}
+                className="block w-full px-4 py-3 text-left hover:bg-secondary/70"
+              >
+                分别下载原图
+              </button>
+              <button
+                onClick={handleZipDownload}
+                className="block w-full px-4 py-3 text-left hover:bg-secondary/70"
+              >
+                打包 ZIP 下载
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <MasonryPhotoGrid 
         photos={photos} 
-        columnWidth={columnWidth}
+        columnCount={gridColumns}
         onClickPhoto={handlePhotoClick}
       />
 

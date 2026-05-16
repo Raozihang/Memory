@@ -1,6 +1,6 @@
 import { Photo } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type CSSProperties } from 'react';
 import { api } from '@/lib/api';
 import { LazyImage } from './LazyImage';
 import { imageCache } from '@/lib/imageCache';
@@ -10,6 +10,7 @@ interface MasonryPhotoGridProps {
   onClickPhoto: (index: number) => void;
   className?: string;
   columnWidth?: number;
+  columnCount?: number;
   gap?: number;
 }
 
@@ -21,6 +22,7 @@ export function MasonryPhotoGrid({
   onClickPhoto,
   className,
   columnWidth = 160,
+  columnCount,
   gap = 8
 }: MasonryPhotoGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +67,10 @@ export function MasonryPhotoGrid({
     const updateColumns = () => {
       if (!containerRef.current) return;
       const width = containerRef.current.offsetWidth;
+      if (columnCount) {
+        setColumns(Math.max(1, columnCount));
+        return;
+      }
       // 移动端小屏幕（<400px）使用单列，否则根据宽度计算
       let cols: number;
       if (width < 400) {
@@ -83,7 +89,7 @@ export function MasonryPhotoGrid({
       observer.observe(containerRef.current);
     }
     return () => observer.disconnect();
-  }, [columnWidth, gap]);
+  }, [columnCount, columnWidth, gap]);
 
   // 图片加载完成后更新宽高比（批量更新减少重排）
   const pendingUpdates = useRef<Record<string, number>>({});
@@ -171,13 +177,13 @@ export function MasonryPhotoGrid({
   return (
     <div 
       ref={containerRef}
-      className={cn("flex w-full", className)}
-      style={{ gap }}
+      className={cn("grid w-full min-w-0", className)}
+      style={{ gap, gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
       {columnPhotos.map((colPhotos, colIndex) => (
         <div 
           key={colIndex} 
-          className="flex flex-1 flex-col"
+          className="flex min-w-0 flex-col"
           style={{ gap }}
         >
           {colPhotos.map(({ photo, index }) => {
@@ -187,6 +193,9 @@ export function MasonryPhotoGrid({
             // 检查是否有缓存的高清图可用，且未失败过
             const hasHighQuality = highQualityIds.has(photo.id) && !failedHighQuality.has(photo.id);
             const highQualitySrc = hasHighQuality ? api.getPhotoUrl(photo, 'display') : undefined;
+            const itemStyle: CSSProperties = aspect
+              ? { aspectRatio: aspect, contentVisibility: 'auto', containIntrinsicSize: '240px 320px' }
+              : { aspectRatio: 1, contentVisibility: 'auto', containIntrinsicSize: '240px 240px' };
             
             return (
               <div 
@@ -195,14 +204,14 @@ export function MasonryPhotoGrid({
                   "relative w-full overflow-hidden rounded-xl bg-muted cursor-zoom-in group",
                   !isLoaded && "min-h-[200px]"
                 )}
-                style={aspect ? { aspectRatio: aspect } : { aspectRatio: 1 }}
+                style={itemStyle}
                 onClick={() => onClickPhoto(index)}
               >
                 <LazyImage
                   src={api.getPhotoUrl(photo, 'thumb')}
                   highQualitySrc={highQualitySrc}
                   alt={photo.filename}
-                  className="hover:scale-105 transition-transform duration-500"
+                  sizes={columns <= 1 ? '100vw' : columns === 2 ? '50vw' : `${Math.ceil(100 / columns)}vw`}
                   onLoad={(img) => handleImageLoad(photo, img)}
                   onHighQualityError={() => {
                     // 高清图加载失败，标记为失败，回退到 thumb

@@ -66,8 +66,8 @@ try {
     read(key) {
       return fs.readFileSync(path.join(STORAGE_DIR, key))
     },
-    getSignedUrl(key) {
-      return `/api/files/${encodeURIComponent(key)}`
+    getSignedUrl(key, options = {}) {
+      return `/api/files/${encodeStorageKeyForPath(key)}${options.downloadName ? '?download=1' : ''}`
     },
     filePath(key) {
       return path.join(STORAGE_DIR, key)
@@ -1162,15 +1162,8 @@ async function handleApiRequest(req, res, url) {
 
   // 5. Timeline
   if (req.method === 'GET' && url.pathname === '/api/timeline') {
-    const photos = await dao.getPhotos()
-    const groups = {}
-    for (const p of photos) {
-      const d = new Date(p.taken_at)
-      if (isNaN(d.getTime())) continue
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      groups[key] = (groups[key] || 0) + 1
-    }
-    return sendJson(res, { days: groups })
+    const summary = await dao.getTimelineSummary()
+    return sendJson(res, summary)
   }
 
   // 6. Albums (List/Create/Update)
@@ -1240,6 +1233,29 @@ async function handleApiRequest(req, res, url) {
     })
   }
 
+  if (req.method === 'GET' && url.pathname.match(/^\/api\/albums\/([a-z0-9]+)\/downloadUrls$/)) {
+    const albumId = url.pathname.split('/')[3]
+    const photos = await dao.getPhotos()
+    const albumPhotos = photos.filter(p => p.album_id === albumId)
+
+    try {
+      return sendJson(res, {
+        albumId,
+        files: albumPhotos.map(p => {
+          const filename = p.filename || path.basename(p.storage_key)
+          return {
+            id: p.id,
+            filename,
+            url: storage.getSignedUrl(p.storage_key, { downloadName: filename })
+          }
+        })
+      })
+    } catch (e) {
+      console.error('Download URL generation failed:', e)
+      return sendJson(res, { error: 'download url signing is not configured' }, 500)
+    }
+  }
+
   if ((req.method === 'POST' || req.method === 'GET') && url.pathname.match(/^\/api\/albums\/([a-z0-9]+)\/export$/)) {
     const albumId = url.pathname.split('/')[3]
     const photos = await dao.getPhotos()
@@ -1286,15 +1302,13 @@ async function handleApiRequest(req, res, url) {
     if (fs.existsSync(localPath)) {
       return sendFile(localPath, p.mime || 'application/octet-stream', req, res, { downloadName })
     }
+    let signedUrl
     try {
-      const buffer = await storage.read(p.storage_key)
-      if (buffer && buffer.length) {
-        return sendBuffer(buffer, p.mime || 'application/octet-stream', req, res, { downloadName })
-      }
+      signedUrl = storage.getSignedUrl(p.storage_key, { downloadName })
     } catch (e) {
-      console.error('Download read failed:', e)
+      console.error('Download URL generation failed:', e)
+      return sendJson(res, { error: 'download url signing is not configured' }, 500)
     }
-    const signedUrl = storage.getSignedUrl(p.storage_key)
     if (typeof signedUrl === 'string' && /^https?:\/\//i.test(signedUrl)) {
       res.statusCode = 302
       res.setHeader('Location', signedUrl)
@@ -1308,7 +1322,16 @@ async function handleApiRequest(req, res, url) {
     const id = url.pathname.split('/')[3]
     const p = await dao.getPhoto(id)
     if (!p) return sendJson(res, { error: 'not found' }, 404)
-    return sendJson(res, { url: storage.getSignedUrl(p.storage_key) })
+    const downloadName = p.filename || path.basename(p.storage_key)
+    try {
+      return sendJson(res, {
+        filename: downloadName,
+        url: storage.getSignedUrl(p.storage_key, { downloadName })
+      })
+    } catch (e) {
+      console.error('Download URL generation failed:', e)
+      return sendJson(res, { error: 'download url signing is not configured' }, 500)
+    }
   }
 
   if (req.method === 'GET' && url.pathname.match(/^\/api\/photos\/([a-z0-9]+)\/exif$/)) {

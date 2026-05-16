@@ -1,10 +1,15 @@
+import { lazy, Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
 import { Home, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLayout } from '@/lib/LayoutContext';
-import { BottomCapsuleDateTimeline } from '@/components/DraggableDateTimeline';
 import { InternalLink } from '@/components/InternalLink';
+
+const BottomCapsuleDateTimeline = lazy(() =>
+  import('@/components/DraggableDateTimeline').then(module => ({
+    default: module.BottomCapsuleDateTimeline,
+  }))
+);
 
 export function Layout() {
   const location = useLocation();
@@ -57,22 +62,10 @@ export function Layout() {
         <Outlet />
       </main>
       
-      <AnimatePresence initial={false}>
-        {showMobileCapsule ? (
-          <motion.div
-            key="mobile-capsule"
-            initial={{ y: 24, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 24, opacity: 0 }}
-            transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
-            className="layout-nav md:hidden fixed left-0 right-0 bottom-8 z-40 px-3"
-          >
+      {showMobileCapsule ? (
+          <div className="layout-nav md:hidden fixed left-0 right-0 bottom-8 z-40 px-3 transition-all duration-200">
             <div className="w-full flex justify-center">
-              <motion.div
-                layout
-                transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
-                className="relative inline-flex items-center gap-2 max-w-[92vw] rounded-full bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl ring-1 ring-white/5 px-2.5 py-2"
-              >
+              <div className="relative inline-flex items-center gap-2 max-w-[92vw] rounded-full bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl ring-1 ring-white/5 px-2.5 py-2">
                 <InternalLink
                   to="/"
                   className={cn(
@@ -86,17 +79,9 @@ export function Layout() {
                   <Home className={cn("h-5 w-5", location.pathname === '/' && "stroke-[2.5px]")} />
                 </InternalLink>
 
-                <AnimatePresence mode="wait" initial={false}>
-                  {location.pathname === '/timeline' && timelineCapsule ? (
-                    <motion.div
-                      key="timeline-date"
-                      layout
-                      initial={{ opacity: 0, x: 8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -8 }}
-                      transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-                      className="relative"
-                    >
+                {location.pathname === '/timeline' && timelineCapsule ? (
+                    <div className="relative">
+                      <Suspense fallback={null}>
                       <BottomCapsuleDateTimeline
                         embedded
                         onDateSelect={timelineCapsule.onDateSelect}
@@ -105,16 +90,10 @@ export function Layout() {
                         value={timelineCapsule.value}
                         mode={timelineCapsule.mode}
                       />
-                    </motion.div>
+                      </Suspense>
+                    </div>
                   ) : (
-                    <motion.div
-                      key="timeline-link"
-                      layout
-                      initial={{ opacity: 0, x: 8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -8 }}
-                      transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-                    >
+                    <div>
                       <InternalLink
                         to="/timeline"
                         className={cn(
@@ -127,14 +106,12 @@ export function Layout() {
                       >
                         <Calendar className={cn("h-5 w-5", location.pathname === '/timeline' && "stroke-[2.5px]")} />
                       </InternalLink>
-                    </motion.div>
+                    </div>
                   )}
-                </AnimatePresence>
-              </motion.div>
+              </div>
             </div>
-          </motion.div>
+          </div>
         ) : null}
-      </AnimatePresence>
 
       <footer className="py-8 text-center text-sm text-muted-foreground pb-32 md:pb-8">
         <p>

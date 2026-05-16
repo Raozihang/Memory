@@ -16,6 +16,12 @@ const isWeChat = () => {
   return /micromessenger/.test(ua);
 };
 
+// 鸿蒙/华为系浏览器需要原生长按菜单来保存图片。
+const isHarmonyOSBrowser = () => {
+  const ua = navigator.userAgent.toLowerCase();
+  return /harmonyos|openharmony|arkweb|huaweibrowser|huawei|honor/.test(ua);
+};
+
 interface PhotoViewerProps {
   photos: Photo[];
   initialIndex: number;
@@ -40,6 +46,9 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
   const [showLastPhotoTip, setShowLastPhotoTip] = useState(false);
   const [showLoadingTip, setShowLoadingTip] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [downloading, setDownloading] = useState(false);
+  const [originalDownloadUrl, setOriginalDownloadUrl] = useState('');
+  const [originalDownloadFilename, setOriginalDownloadFilename] = useState('');
   
   // 渐进式加载状态：先显示缩略图，再切换到大图
   const [thumbLoaded, setThumbLoaded] = useState(false);
@@ -51,21 +60,26 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
   
   // 缓存微信环境检测结果
   const isWeChatEnv = useMemo(() => isWeChat(), []);
+  const isHarmonyOSEnv = useMemo(() => isHarmonyOSBrowser(), []);
+  const allowNativeImageActions = isWeChatEnv || isHarmonyOSEnv;
+  const isMobileViewport = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+  }, []);
 
   const thumbUrl = useMemo(() => api.getPhotoUrl(photo, 'thumb'), [photo]);
   const mediumUrl = useMemo(() => api.getPhotoUrl(photo, 'medium'), [photo]);
   const displayUrl = useMemo(() => api.getPhotoUrl(photo, 'display'), [photo]);
   const originalUrl = useMemo(() => api.getPhotoUrl(photo, 'original'), [photo]);
-  const downloadUrl = useMemo(() => api.getPhotoDownloadUrl(photo.id), [photo.id]);
-  const weChatImageStyle = useMemo<CSSProperties | undefined>(() => {
-    if (!isWeChatEnv) return undefined;
+  const nativeImageActionStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!allowNativeImageActions) return undefined;
     return {
       WebkitTouchCallout: 'default',
       WebkitUserSelect: 'auto',
       userSelect: 'auto',
       touchAction: 'auto',
     };
-  }, [isWeChatEnv]);
+  }, [allowNativeImageActions]);
   
   // 根据 fallback 级别选择预览图：display -> medium -> original
   const previewUrl = useMemo(() => {
@@ -76,7 +90,10 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
     }
   }, [fallbackLevel, displayUrl, mediumUrl, originalUrl]);
   
-  const shownSrc = viewOriginal ? originalUrl : previewUrl;
+  const originalViewUrl = originalDownloadUrl || originalUrl;
+  const shownSrc = viewOriginal ? originalViewUrl : previewUrl;
+  const shouldForceOriginalPrompt = isWeChatEnv && isHarmonyOSEnv && (!viewOriginal || loadingOriginal);
+  const saveTipText = shouldForceOriginalPrompt ? '请先查看原图，再长按保存' : '长按图片保存';
   
   // 判断是否显示加载中状态（缩略图和大图都没加载完）
   const isLoading = (!thumbLoaded && !displayLoaded) || loadingOriginal;
@@ -108,7 +125,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
     // 打开 viewer 时隐藏胶囊导航
     setViewerOpen(true);
     
-    if (isWeChatEnv) {
+    if (allowNativeImageActions) {
       document.body.classList.add('wechat-viewer-active');
     }
 
@@ -116,13 +133,15 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
       setViewerOpen(false);
       document.body.classList.remove('wechat-viewer-active');
     };
-  }, [isWeChatEnv, setViewerOpen]);
+  }, [allowNativeImageActions, setViewerOpen]);
 
   useEffect(() => {
     setViewOriginal(false);
     setLoadingOriginal(false);
     setLoadError(false);
     setFallbackLevel(0); // 重置为默认 display 级别
+    setOriginalDownloadUrl('');
+    setOriginalDownloadFilename('');
     
     // 检查是否已有缓存的高清图
     const cachedQuality = imageCache.getLoadedQuality(photo.id);
@@ -180,19 +199,75 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
 
   const handleShownImageError = useCallback(() => {
     if (viewOriginal) {
+      if (originalDownloadUrl) {
+        setOriginalDownloadUrl('');
+        setOriginalDownloadFilename('');
+        return;
+      }
       setViewOriginal(false);
       setLoadingOriginal(false);
       setLoadError(true);
       return;
     }
     handlePreviewError();
-  }, [handlePreviewError, viewOriginal]);
+  }, [handlePreviewError, originalDownloadUrl, viewOriginal]);
 
-  const handleViewOriginal = useCallback(() => {
+  const handleViewOriginal = useCallback(async () => {
     setLoadingOriginal(true);
     setLoadError(false);
-    setViewOriginal(true);
+    try {
+      if (!originalDownloadUrl) {
+        const result = await api.getPhotoDownloadUrl(photo.id);
+        setOriginalDownloadUrl(result.url);
+        setOriginalDownloadFilename(result.filename || photo.filename);
+      }
+      setViewOriginal(true);
+    } catch (error) {
+      console.error(error);
+      setLoadingOriginal(false);
+      setLoadError(true);
+    }
+  }, [originalDownloadUrl, photo.id, photo.filename]);
+
+  const startDownload = useCallback((url: string, filename?: string) => {
+    const link = document.createElement('a');
+    link.href = url;
+    if (filename) link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }, []);
+
+  const showLongPressSaveTip = useCallback(() => {
+    setShowWeChatTip(true);
+    setTimeout(() => setShowWeChatTip(false), 2000);
+  }, []);
+
+  const handleDownload = useCallback(async () => {
+    if (shouldForceOriginalPrompt) {
+      showLongPressSaveTip();
+      return;
+    }
+
+    if (downloading) return;
+    if (originalDownloadUrl) {
+      startDownload(originalDownloadUrl, originalDownloadFilename || photo.filename);
+      return;
+    }
+
+    setDownloading(true);
+    try {
+      const result = await api.getPhotoDownloadUrl(photo.id);
+      setOriginalDownloadUrl(result.url);
+      setOriginalDownloadFilename(result.filename || photo.filename);
+      startDownload(result.url, result.filename || photo.filename);
+    } catch (error) {
+      console.error(error);
+      showLongPressSaveTip();
+    } finally {
+      setDownloading(false);
+    }
+  }, [downloading, originalDownloadFilename, originalDownloadUrl, photo.id, photo.filename, shouldForceOriginalPrompt, showLongPressSaveTip, startDownload]);
 
   const handleNext = useCallback(() => {
     if (index < photos.length - 1) {
@@ -275,8 +350,71 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
     }
   };
 
+  const imageContent = (
+    <div
+      className="relative flex items-center justify-center w-full h-full"
+      style={nativeImageActionStyle}
+    >
+      {/* 缩略图作为占位 - 先显示，大图加载完成后切换 */}
+      {!displayLoaded && !viewOriginal && (
+        <img
+          src={thumbUrl}
+          alt=""
+          className={cn(
+            "absolute inset-0 w-full h-full object-contain transition-opacity duration-200",
+            thumbLoaded ? "opacity-100" : "opacity-0"
+          )}
+          onLoad={handleThumbLoad}
+          decoding="async"
+        />
+      )}
+
+      {/* 大图 - 加载完成后显示 */}
+      <img
+        src={shownSrc}
+        alt={photo.filename}
+        className={cn(
+          "w-full h-full object-contain shadow-2xl transition-opacity duration-300",
+          displayLoaded || viewOriginal ? "opacity-100" : "opacity-0",
+          // 需要原生图片菜单的环境允许长按操作，其他环境保持预览手势。
+          !allowNativeImageActions && "select-none"
+        )}
+        onLoad={handleDisplayLoad}
+        onError={handleShownImageError}
+        // 微信/鸿蒙等环境不阻止右键/长按菜单，允许分享和保存。
+        onContextMenu={allowNativeImageActions ? undefined : (e) => e.preventDefault()}
+        style={nativeImageActionStyle}
+        decoding="async"
+      />
+
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <Loader className="h-6 w-6 animate-spin text-white/70" />
+        </div>
+      )}
+
+      {shouldForceOriginalPrompt && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/75 px-6 text-center">
+          <div className="max-w-xs">
+            <div className="text-base font-medium text-white">请先查看原图</div>
+            <div className="mt-2 text-sm leading-6 text-white/75">
+              加载原图后再长按保存，才能下载到清晰版本。
+            </div>
+            <button
+              onClick={handleViewOriginal}
+              disabled={loadingOriginal}
+              className="mt-5 inline-flex h-10 items-center justify-center rounded-full bg-white px-5 text-sm font-medium text-black disabled:opacity-70"
+            >
+              {loadingOriginal ? `加载中 ${progress}%` : loadError ? '重新加载原图' : '查看原图'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm">
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/95", !isMobileViewport && "backdrop-blur-sm")}>
       <div className="absolute right-4 top-4 z-[80] flex gap-2">
         <button 
           onClick={() => setShowInfo(!showInfo)}
@@ -286,22 +424,19 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
         </button>
         {isWeChatEnv ? (
           <button
-            onClick={() => {
-              setShowWeChatTip(true);
-              setTimeout(() => setShowWeChatTip(false), 2000);
-            }}
+            onClick={showLongPressSaveTip}
             className="rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
           >
             <Download className="h-6 w-6" />
           </button>
         ) : (
-          <a 
-            href={downloadUrl} 
-            download={photo.filename}
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
             className="rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
           >
-            <Download className="h-6 w-6" />
-          </a>
+            {downloading ? <Loader className="h-6 w-6 animate-spin" /> : <Download className="h-6 w-6" />}
+          </button>
         )}
         <button 
           onClick={onClose}
@@ -351,13 +486,16 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
             initial="enter"
              animate="center"
              exit="exit"
-             transition={{
+             transition={isMobileViewport ? {
+               x: { duration: 0.18, ease: "easeOut" },
+               opacity: { duration: 0.12 }
+             } : {
                x: { type: "spring", stiffness: 300, damping: 30 },
                opacity: { duration: 0.2 }
              }}
-             drag={!isZoomed && !isWeChatEnv ? "x" : false}
+             drag={!isZoomed && !allowNativeImageActions ? "x" : false}
              dragConstraints={{ left: 0, right: 0 }}
-             dragElastic={0.2}
+             dragElastic={isMobileViewport ? 0.08 : 0.2}
              onDragEnd={handleDragEnd}
              onTouchStart={(e) => {
                if (e.touches.length > 1) {
@@ -368,10 +506,13 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
              }}
              className={cn(
                "absolute inset-0 flex items-center justify-center p-4",
-               isWeChatEnv ? "touch-auto" : "touch-none"
+               allowNativeImageActions ? "touch-auto" : "touch-none"
              )}
            >
-             <TransformWrapper
+             {allowNativeImageActions ? (
+               imageContent
+             ) : (
+               <TransformWrapper
                 ref={transformComponentRef}
                 initialScale={1}
                 minScale={0.5}
@@ -383,60 +524,21 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
                   mode: "reset",
                   step: 3 // Double click to zoom in 3x
                 }}
-                panning={{ disabled: !isZoomed || isWeChatEnv }}
+                panning={{ disabled: !isZoomed || allowNativeImageActions }}
               >
                 <TransformComponent
                   wrapperClass="!w-full !h-full"
                 contentClass="!w-full !h-full flex items-center justify-center"
               >
-                <div 
-                  className="relative flex items-center justify-center w-full h-full"
-                >
-                  {/* 缩略图作为占位 - 先显示，大图加载完成后切换 */}
-                  {!displayLoaded && !viewOriginal && (
-                    <img
-                      src={thumbUrl}
-                      alt=""
-                      className={cn(
-                        "absolute inset-0 w-full h-full object-contain transition-opacity duration-200",
-                        thumbLoaded ? "opacity-100" : "opacity-0"
-                      )}
-                      onLoad={handleThumbLoad}
-                      decoding="async"
-                    />
-                  )}
-                  
-                  {/* 大图 - 加载完成后显示 */}
-                  <img
-                    src={shownSrc}
-                    alt={photo.filename}
-                    className={cn(
-                      "w-full h-full object-contain shadow-2xl transition-opacity duration-300",
-                      displayLoaded || viewOriginal ? "opacity-100" : "opacity-0",
-                      // 微信环境允许长按操作，非微信环境禁止选择
-                      !isWeChatEnv && "select-none"
-                    )}
-                    onLoad={handleDisplayLoad}
-                    onError={handleShownImageError}
-                    // 微信环境不阻止右键/长按菜单，允许分享和保存
-                    onContextMenu={isWeChatEnv ? undefined : (e) => e.preventDefault()}
-                    style={weChatImageStyle}
-                    decoding="async"
-                  />
-
-                  {isLoading && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Loader className="h-6 w-6 animate-spin text-white/70" />
-                    </div>
-                  )}
-                </div>
+                {imageContent}
               </TransformComponent>
             </TransformWrapper>
+             )}
           </motion.div>
         </AnimatePresence>
       </div>
 
-      {(!viewOriginal || loadingOriginal) && !isZoomed && (
+      {(!viewOriginal || loadingOriginal) && !isZoomed && !shouldForceOriginalPrompt && (
         <div className="absolute bottom-12 left-0 right-0 flex justify-center z-50 pointer-events-none">
           <button
             onClick={(e) => {
@@ -524,7 +626,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLo
       {showWeChatTip && (
         <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[60] animate-fade-in-out">
           <div className="rounded-xl bg-zinc-800/95 px-5 py-3 text-sm text-white shadow-lg border border-white/10 whitespace-nowrap">
-            查看原图后长按保存
+            {saveTipText}
           </div>
         </div>
       )}

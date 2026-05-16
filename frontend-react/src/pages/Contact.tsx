@@ -1,6 +1,8 @@
 import { SEO } from '@/components/SEO';
 import { InternalLink } from '@/components/InternalLink';
 
+const contactQrImage = import.meta.env.VITE_CONTACT_QR_IMAGE || '/WeChat.png';
+
 export default function ContactPage() {
   return (
     <div className="mx-auto max-w-3xl py-10">
@@ -33,7 +35,7 @@ export default function ContactPage() {
           <div className="flex flex-col items-center justify-center gap-2">
             <div className="overflow-hidden rounded-xl border border-border bg-background/80 p-2 shadow-sm">
               <img
-                src="https://youke2.picui.cn/s1/2025/12/12/693c0b219dd14.png"
+                src={contactQrImage}
                 alt="微信联系二维码"
                 className="h-52 w-52 max-w-full object-contain"
               />

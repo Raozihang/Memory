@@ -9,22 +9,31 @@ interface AlbumCardProps {
 }
 
 export function AlbumCard({ album, coverPhoto }: AlbumCardProps) {
-  const [fallbackLevel, setFallbackLevel] = useState(0); // 0: display, 1: medium, 2: original
+  const [fallbackLevel, setFallbackLevel] = useState(0); // 0: thumb, 1: medium, 2: display, 3: original
 
   const getCoverUrl = useCallback(() => {
     if (!coverPhoto) return '';
     switch (fallbackLevel) {
-      case 0: return api.getPhotoUrl(coverPhoto, 'display');
+      case 0: return api.getPhotoUrl(coverPhoto, 'thumb');
       case 1: return api.getPhotoUrl(coverPhoto, 'medium');
+      case 2: return api.getPhotoUrl(coverPhoto, 'display');
       default: return api.getPhotoUrl(coverPhoto, 'original');
     }
   }, [coverPhoto, fallbackLevel]);
 
   const handleError = useCallback(() => {
-    if (fallbackLevel < 2) {
+    if (fallbackLevel < 3) {
       setFallbackLevel(prev => prev + 1);
     }
   }, [fallbackLevel]);
+
+  const coverSrcSet = coverPhoto && fallbackLevel === 0
+    ? [
+      `${api.getPhotoUrl(coverPhoto, 'thumb')} 320w`,
+      `${api.getPhotoUrl(coverPhoto, 'medium')} 800w`,
+      `${api.getPhotoUrl(coverPhoto, 'display')} 1280w`,
+    ].join(', ')
+    : undefined;
 
   return (
     <InternalLink 
@@ -35,9 +44,12 @@ export function AlbumCard({ album, coverPhoto }: AlbumCardProps) {
         {coverPhoto ? (
           <img 
             src={getCoverUrl()} 
+            srcSet={coverSrcSet}
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
             alt={album.title}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+            className="h-full w-full object-cover transition-transform duration-500 md:group-hover:scale-110"
             loading="lazy"
+            decoding="async"
             onError={handleError}
           />
         ) : (

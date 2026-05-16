@@ -24,6 +24,29 @@ function joinPublicUrl(base, key) {
   return `${trimmed}/${encodedKey}`
 }
 
+function contentDisposition(filename) {
+  if (!filename) return ''
+  const fallback = String(filename)
+    .replace(/[^\x20-\x7E]/g, '_')
+    .replace(/["\\]/g, '_') || 'download'
+  const encoded = encodeURIComponent(String(filename))
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`
+}
+
+function getDomainOptions(base) {
+  if (!base) return {}
+  const normalized = String(base).startsWith('//') ? `https:${base}` : String(base)
+  try {
+    const u = new URL(/^https?:\/\//i.test(normalized) ? normalized : `https://${normalized}`)
+    return {
+      Protocol: u.protocol.replace(':', ''),
+      Domain: u.host
+    }
+  } catch {
+    return { Domain: String(base).replace(/^https?:\/\//i, '').replace(/\/+$/, '') }
+  }
+}
+
 function streamToBuffer(stream) {
   return new Promise((resolve, reject) => {
     const chunks = []
@@ -42,6 +65,10 @@ const cos = new COS({
   SecretId: secretId,
   SecretKey: secretKey
 })
+
+function canSignUrl() {
+  return Boolean(secretId && secretKey && bucket && region)
+}
 
 async function headObject(key) {
   return new Promise((resolve, reject) => {
@@ -105,17 +132,28 @@ module.exports = {
     return Buffer.from([])
   },
   getSignedUrl(key, options = {}) {
-    const publicBase = process.env.COS_PUBLIC_BASE || process.env.COS_CDN_BASE
-    if (publicBase) return joinPublicUrl(publicBase, key)
+    const cdnBase = process.env.COS_CDN_BASE
+    const disposition = contentDisposition(options.downloadName)
+    if (cdnBase && !disposition) {
+      return joinPublicUrl(cdnBase, key)
+    }
+
+    if (disposition && !canSignUrl()) {
+      throw new Error('COS download URL signing is not configured')
+    }
 
     const expires = Number(options.expires || process.env.COS_SIGN_EXPIRES || 600)
+    const domainOptions = cdnBase ? getDomainOptions(cdnBase) : {}
+    const forceSignHost = process.env.COS_DOWNLOAD_FORCE_SIGN_HOST === 'true'
     return cos.getObjectUrl({
       Bucket: required('COS_BUCKET', bucket),
       Region: required('COS_REGION', region),
       Key: key,
       Sign: true,
-      Expires: Number.isFinite(expires) && expires > 0 ? expires : 600
+      ForceSignHost: disposition ? forceSignHost : undefined,
+      Expires: Number.isFinite(expires) && expires > 0 ? expires : 600,
+      ...domainOptions,
+      ...(disposition ? { Query: { 'response-content-disposition': disposition } } : {})
     })
   }
 }
-

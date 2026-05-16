@@ -18,6 +18,11 @@ function readJson(p) {
 function writeJson(p, v) {
   fs.writeFileSync(p, JSON.stringify(v, null, 2))
 }
+function toDbDate(value) {
+    if (!value) return null
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? null : date
+}
 
 module.exports = {
     // Getter to ensure we read the env var at runtime
@@ -37,11 +42,13 @@ module.exports = {
     async getPhotos(options = {}) {
         const { albumId = null, startTakenAt = null, endTakenAt = null, limit = null, offset = 0 } = options || {}
         if (this.USE_MYSQL) {
+            const dbStartTakenAt = toDbDate(startTakenAt)
+            const dbEndTakenAt = toDbDate(endTakenAt)
             if (limit !== null && limit !== undefined) {
-                return await db.getPhotosPaged({ albumId, startTakenAt, endTakenAt, limit, offset })
+                return await db.getPhotosPaged({ albumId, startTakenAt: dbStartTakenAt, endTakenAt: dbEndTakenAt, limit, offset })
             }
             if (albumId || startTakenAt || endTakenAt) {
-                return await db.getPhotosPaged({ albumId, startTakenAt, endTakenAt, limit: 1000000, offset: 0 })
+                return await db.getPhotosPaged({ albumId, startTakenAt: dbStartTakenAt, endTakenAt: dbEndTakenAt, limit: 1000000, offset: 0 })
             }
             return await db.getPhotos()
         }
@@ -71,12 +78,46 @@ module.exports = {
     },
     async countPhotos(options = {}) {
         const { albumId = null, startTakenAt = null, endTakenAt = null } = options || {}
-        if (this.USE_MYSQL) return await db.getPhotosCount({ albumId, startTakenAt, endTakenAt })
+        if (this.USE_MYSQL) return await db.getPhotosCount({ albumId, startTakenAt: toDbDate(startTakenAt), endTakenAt: toDbDate(endTakenAt) })
         let photos = readJson(DB_PATHS.photos)
         if (albumId) photos = photos.filter(p => p.album_id === albumId)
         if (startTakenAt) photos = photos.filter(p => p.taken_at >= startTakenAt)
         if (endTakenAt) photos = photos.filter(p => p.taken_at < endTakenAt)
         return photos.length
+    },
+    async getTimelineSummary() {
+        const toBucket = (date, mode) => {
+            const d = new Date(date)
+            if (Number.isNaN(d.getTime())) return null
+            const y = d.getFullYear()
+            const m = String(d.getMonth() + 1).padStart(2, '0')
+            const day = String(d.getDate()).padStart(2, '0')
+            if (mode === 'day') return `${y}-${m}-${day}`
+            const h = String(d.getHours()).padStart(2, '0')
+            return `${y}-${m}-${day} ${h}:00:00`
+        }
+
+        if (this.USE_MYSQL) return await db.getTimelineSummary()
+
+        const photos = readJson(DB_PATHS.photos)
+        const days = new Map()
+        const hours = new Map()
+
+        for (const photo of photos) {
+            const day = toBucket(photo.taken_at, 'day')
+            const hour = toBucket(photo.taken_at, 'hour')
+            if (day) days.set(day, (days.get(day) || 0) + 1)
+            if (hour) hours.set(hour, (hours.get(hour) || 0) + 1)
+        }
+
+        const toItems = (map) => Array.from(map.entries())
+            .sort(([a], [b]) => b.localeCompare(a))
+            .map(([bucket, count]) => ({ bucket, count }))
+
+        return {
+            days: toItems(days),
+            hours: toItems(hours)
+        }
     },
     async getPhotosByIds(photoIds = []) {
         if (this.USE_MYSQL) return await db.getPhotosByIds(photoIds)

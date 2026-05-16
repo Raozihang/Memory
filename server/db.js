@@ -120,6 +120,31 @@ async function getPhotosCount({ albumId = null, startTakenAt = null, endTakenAt 
     return rows[0]?.cnt || 0;
 }
 
+async function getTimelineSummary() {
+    if (!pool) return { days: [], hours: [] };
+
+    const [dayRows] = await pool.query(`
+        SELECT DATE_FORMAT(taken_at, '%Y-%m-%d') AS bucket, COUNT(*) AS count
+        FROM photos
+        WHERE taken_at IS NOT NULL
+        GROUP BY bucket
+        ORDER BY bucket DESC
+    `);
+
+    const [hourRows] = await pool.query(`
+        SELECT DATE_FORMAT(taken_at, '%Y-%m-%d %H:00:00') AS bucket, COUNT(*) AS count
+        FROM photos
+        WHERE taken_at IS NOT NULL
+        GROUP BY bucket
+        ORDER BY bucket DESC
+    `);
+
+    return {
+        days: dayRows.map(row => ({ bucket: row.bucket, count: Number(row.count) || 0 })),
+        hours: hourRows.map(row => ({ bucket: row.bucket, count: Number(row.count) || 0 }))
+    };
+}
+
 async function getPhoto(id) {
     if (!pool) return null;
     const [rows] = await pool.query('SELECT * FROM photos WHERE id = ?', [id]);
@@ -238,6 +263,7 @@ module.exports = {
     getPhotos,
     getPhotosPaged,
     getPhotosCount,
+    getTimelineSummary,
     getPhoto,
     getPhotosByIds,
     createPhoto,

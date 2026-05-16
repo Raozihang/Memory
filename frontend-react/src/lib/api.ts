@@ -76,8 +76,11 @@ export const api = {
   getExif: async (id: string): Promise<ExifData> => {
     return fetchJson(`/api/photos/${id}/exif`);
   },
-  getPhotoDownloadUrl: (id: string) => {
-    return `/api/photos/${encodeURIComponent(id)}/download`;
+  getPhotoDownloadUrl: async (id: string): Promise<{ url: string; filename?: string }> => {
+    return fetchJson(`/api/photos/${encodeURIComponent(id)}/downloadUrl`);
+  },
+  getAlbumDownloadUrls: async (id: string): Promise<{ files: Array<{ id: string; url: string; filename?: string }> }> => {
+    return fetchJson(`/api/albums/${encodeURIComponent(id)}/downloadUrls`);
   },
   exportAlbum: async (id: string): Promise<{ url: string; filename?: string }> => {
     return fetchJson(`/api/albums/${encodeURIComponent(id)}/export`);

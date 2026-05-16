@@ -7,6 +7,7 @@ interface LazyImageProps {
   highQualitySrc?: string;
   alt: string;
   className?: string;
+  sizes?: string;
   onLoad?: (img: HTMLImageElement) => void;
   /** 高清图加载失败时的回调 */
   onHighQualityError?: () => void;
@@ -24,6 +25,7 @@ export const LazyImage = memo(function LazyImage({
   highQualitySrc,
   alt, 
   className, 
+  sizes,
   onLoad,
   onHighQualityError,
   onClick 
@@ -106,11 +108,13 @@ export const LazyImage = memo(function LazyImage({
           key={displaySrc} // 使用 key 确保图片切换时不会闪烁
           src={displaySrc}
           alt={alt}
+          sizes={sizes}
           className={cn(
-            "w-full h-full object-cover transition-opacity duration-300",
+            "w-full h-full object-contain transition-opacity duration-300",
             loaded ? "opacity-100" : "opacity-0"
           )}
           onLoad={handleLoad}
+          loading="lazy"
           decoding="async"
         />
       )}

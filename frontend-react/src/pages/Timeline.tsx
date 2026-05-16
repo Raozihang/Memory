@@ -1,9 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Photo } from '@/lib/types';
 import { PhotoViewer } from '@/components/PhotoViewer';
 import { MasonryPhotoGrid } from '@/components/MasonryPhotoGrid';
 import { DraggableDateTimeline } from '@/components/DraggableDateTimeline';
+import { GridDensityToggle } from '@/components/GridDensityToggle';
+import { useResponsivePhotoColumns, useStoredGridDensity } from '@/lib/gridDensity';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLayout } from '@/lib/LayoutContext';
 import { cn } from '@/lib/utils';
@@ -17,16 +19,90 @@ const normalizeToHour = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.g
 const formatDayKey = (date: Date) => `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 const formatHourKey = (date: Date) => `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${pad2(date.getHours())}:00`;
 
+const parseTimelineBucket = (bucket: string) => {
+  const [datePart, timePart = '00:00:00'] = bucket.split(' ');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour] = timePart.split(':').map(Number);
+  return new Date(year, (month || 1) - 1, day || 1, hour || 0, 0, 0, 0);
+};
+
+const getDateRange = (date: Date, mode: TimelineMode) => {
+  const start = mode === 'day' ? normalizeToDay(date) : normalizeToHour(date);
+  const end = new Date(start);
+  if (mode === 'day') {
+    end.setDate(end.getDate() + 1);
+  } else {
+    end.setHours(end.getHours() + 1);
+  }
+  return {
+    startTakenAt: start.toISOString(),
+    endTakenAt: end.toISOString(),
+  };
+};
+
 export default function Timeline() {
-  const { data: photos = [], isLoading, isError } = useQuery({
-    queryKey: ['photos', { scope: 'timeline', mode: 'all' }],
-    queryFn: api.getPhotos
+  const { data: timelineSummary, isLoading: isTimelineLoading, isError: isTimelineError } = useQuery({
+    queryKey: ['timeline-summary'],
+    queryFn: api.getTimeline
   });
-  
+
+  const pageSize = useMemo(() => {
+    if (typeof window === 'undefined') return 160;
+    return window.innerWidth < 640 ? 80 : 160;
+  }, []);
   const [mode, setMode] = useState<TimelineMode>('hour');
   const [viewerIndex, setViewerIndex] = useState<number>(-1);
   const [viewerPhotos, setViewerPhotos] = useState<Photo[]>([]);
-  const [columnWidth, setColumnWidth] = useState(200);
+  const [gridDensity, setGridDensity] = useStoredGridDensity('less');
+  const gridColumns = useResponsivePhotoColumns(gridDensity);
+
+  const timelineBuckets = useMemo(() => {
+    if (!timelineSummary) return [];
+    return mode === 'day' ? timelineSummary.days : timelineSummary.hours;
+  }, [mode, timelineSummary]);
+
+  const availableDates = useMemo(() => {
+    return timelineBuckets.map(item => parseTimelineBucket(item.bucket));
+  }, [timelineBuckets]);
+
+  const initialDate = useMemo(() => {
+    return availableDates[0] || new Date();
+  }, [availableDates]);
+
+  const [activeDate, setActiveDate] = useState<Date>(() => initialDate);
+
+  const selectedDate = useMemo(() => {
+    if (availableDates.length === 0) return null;
+    const normalize = mode === 'day' ? normalizeToDay : normalizeToHour;
+    const normalizedActive = normalize(activeDate);
+    return availableDates.find(date => date.getTime() === normalizedActive.getTime()) || initialDate;
+  }, [activeDate, availableDates, initialDate, mode]);
+
+  const dateRange = useMemo(() => {
+    if (!selectedDate) return null;
+    return getDateRange(selectedDate, mode);
+  }, [mode, selectedDate]);
+
+  const {
+    data: photosPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    isError
+  } = useInfiniteQuery({
+    queryKey: ['photos', { scope: 'timeline', mode, pageSize, startTakenAt: dateRange?.startTakenAt, endTakenAt: dateRange?.endTakenAt }],
+    queryFn: ({ pageParam }) => api.getPhotosPage({
+      limit: pageSize,
+      offset: pageParam as number,
+      startTakenAt: dateRange?.startTakenAt,
+      endTakenAt: dateRange?.endTakenAt,
+    }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => (lastPage.nextOffset ?? undefined),
+    enabled: Boolean(dateRange)
+  });
+  const photos = useMemo(() => photosPages?.pages.flatMap(page => page.items) || [], [photosPages]);
   
   // 滚动隐藏顶栏
   const { setImmersive, isImmersive, setTimelineCapsule } = useLayout();
@@ -63,19 +139,6 @@ export default function Timeline() {
     };
   }, [handleScroll, setImmersive]);
 
-  // Responsive column width for masonry
-  useEffect(() => {
-    const updateWidth = () => {
-      const w = window.innerWidth;
-      if (w < 640) setColumnWidth(120); // Mobile: smaller columns
-      else if (w < 1024) setColumnWidth(160);
-      else setColumnWidth(200);
-    };
-    updateWidth();
-    window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
-  }, []);
-
   const groupedPhotos = useMemo(() => {
     const normalize = mode === 'day' ? normalizeToDay : normalizeToHour;
     const toKey = mode === 'day' ? formatDayKey : formatHourKey;
@@ -95,23 +158,6 @@ export default function Timeline() {
       return dateB - dateA;
     });
   }, [photos, mode]);
-
-  const availableDates = useMemo(() => {
-    const normalize = mode === 'day' ? normalizeToDay : normalizeToHour;
-    return groupedPhotos.map(([_, groupPhotos]) => {
-      return normalize(new Date(groupPhotos[0].taken_at));
-    });
-  }, [groupedPhotos, mode]);
-
-  const initialDate = useMemo(() => {
-    const normalize = mode === 'day' ? normalizeToDay : normalizeToHour;
-    if (groupedPhotos.length > 0) {
-      return normalize(new Date(groupedPhotos[0][1][0].taken_at));
-    }
-    return new Date();
-  }, [groupedPhotos, mode]);
-
-  const [activeDate, setActiveDate] = useState<Date>(() => initialDate);
 
   useEffect(() => {
     if (availableDates.length === 0) return;
@@ -174,11 +220,10 @@ export default function Timeline() {
   const handleDateSelect = useCallback((date: Date) => {
     const normalized = mode === 'day' ? normalizeToDay(date) : normalizeToHour(date);
     setActiveDate(normalized);
-    const dateStr = (mode === 'day' ? formatDayKey : formatHourKey)(date);
-    const element = document.getElementById(dateStr);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    setViewerIndex(-1);
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   }, [mode]);
 
   useEffect(() => {
@@ -190,13 +235,13 @@ export default function Timeline() {
     setTimelineCapsule({
       availableDates,
       initialDate,
-      value: activeDate,
+      value: selectedDate || activeDate,
       mode,
       onDateSelect: handleDateSelect,
     });
 
     return () => setTimelineCapsule(null);
-  }, [activeDate, availableDates, handleDateSelect, initialDate, mode, setTimelineCapsule]);
+  }, [activeDate, availableDates, handleDateSelect, initialDate, mode, selectedDate, setTimelineCapsule]);
 
   return (
     <>
@@ -210,32 +255,35 @@ export default function Timeline() {
         "mb-8 sticky top-16 z-30 bg-background/95 backdrop-blur pb-4 pt-4 -mt-4 transition-all duration-300",
         isImmersive && "top-0"
       )}>
-        <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold">时间轴</h1>
             <p className="text-muted-foreground">按时间顺序查看您的照片回忆</p>
           </div>
-          <div className="inline-flex rounded-full border border-white/10 bg-white/5 p-1">
-            <button
-              type="button"
-              onClick={() => setMode('day')}
-              className={[
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
-                mode === 'day' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-              ].join(' ')}
-            >
-              日
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('hour')}
-              className={[
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
-                mode === 'hour' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-              ].join(' ')}
-            >
-              时
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <GridDensityToggle value={gridDensity} onChange={setGridDensity} />
+            <div className="inline-flex rounded-full border border-white/10 bg-white/5 p-1">
+              <button
+                type="button"
+                onClick={() => setMode('day')}
+                className={[
+                  "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
+                  mode === 'day' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                ].join(' ')}
+              >
+                日
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('hour')}
+                className={[
+                  "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
+                  mode === 'hour' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                ].join(' ')}
+              >
+                时
+              </button>
+            </div>
           </div>
         </div>
         <DraggableDateTimeline 
@@ -243,13 +291,13 @@ export default function Timeline() {
           className="hidden md:flex"
           availableDates={availableDates}
           initialDate={initialDate}
-          value={activeDate}
+          value={selectedDate || activeDate}
           mode={mode}
         />
       </div>
 
       <div className="relative border-l border-white/10 ml-4 md:ml-8 pl-8 md:pl-12 py-4 space-y-12">
-        {isError && (
+        {(isError || isTimelineError) && (
           <div className="text-center py-20 text-muted-foreground">
             加载失败
           </div>
@@ -273,21 +321,32 @@ export default function Timeline() {
 
             <MasonryPhotoGrid 
               photos={groupPhotos} 
-              columnWidth={columnWidth}
+              columnCount={gridColumns}
               onClickPhoto={(index: number) => handlePhotoClick(groupPhotos, index)}
             />
           </div>
         ))}
 
-        {isLoading && (
+        {(isLoading || isTimelineLoading) && (
           <div className="text-center py-20 text-muted-foreground">
             加载中...
           </div>
         )}
 
-        {!isLoading && photos.length === 0 && (
+        {!isLoading && !isTimelineLoading && photos.length === 0 && (
           <div className="text-center py-20 text-muted-foreground">
             暂无照片
+          </div>
+        )}
+        {hasNextPage && (
+          <div className="flex justify-center py-4">
+            <button
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
+              className="rounded-full bg-secondary/50 px-6 py-3 text-sm font-medium hover:bg-secondary disabled:opacity-60"
+            >
+              {isFetchingNextPage ? '加载中...' : '加载更多'}
+            </button>
           </div>
         )}
       </div>

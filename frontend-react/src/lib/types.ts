@@ -37,6 +37,12 @@ export interface ExifData {
   exif_json: any
 }
 
+export interface TimelineBucket {
+  bucket: string
+  count: number
+}
+
 export interface TimelineResponse {
-  [date: string]: Photo[]
+  days: TimelineBucket[]
+  hours: TimelineBucket[]
 }

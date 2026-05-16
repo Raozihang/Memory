@@ -2,6 +2,8 @@ import type { MouseEvent } from 'react';
 import { SEO } from '@/components/SEO';
 import { InternalLink } from '@/components/InternalLink';
 
+const donateQrImage = import.meta.env.VITE_DONATE_QR_IMAGE || '/QRcode.jpg';
+
 export default function DonatePage() {
   const wechatRemark = '#付款:饶zi(RZH_rao)/捐赠/002';
 
@@ -45,7 +47,7 @@ export default function DonatePage() {
           <div className="flex flex-col items-center justify-center gap-2">
             <div className="overflow-hidden rounded-xl border border-border bg-background/80 p-2 shadow-sm">
               <img
-                src="https://youke2.picui.cn/s1/2025/12/12/693c073929bc7.jpg"
+                src={donateQrImage}
                 alt="微信捐赠二维码"
                 width={208}
                 height={208}

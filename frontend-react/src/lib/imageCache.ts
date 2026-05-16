@@ -27,8 +27,38 @@ let isPreloading = false;
 // 正在预加载的图片 ID，避免重复加入队列
 const pendingPreload = new Set<string>();
 
+function getConnection() {
+  if (typeof navigator === 'undefined') return null;
+  return (navigator as Navigator & {
+    connection?: { saveData?: boolean; effectiveType?: string };
+  }).connection || null;
+}
+
+function isConstrainedClient() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const connection = getConnection();
+  const isSmallScreen = window.matchMedia('(max-width: 640px)').matches;
+  const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 4;
+  const effectiveType = connection?.effectiveType || '';
+
+  return Boolean(
+    connection?.saveData ||
+    /(^|-)2g$/.test(effectiveType) ||
+    effectiveType === 'slow-2g' ||
+    deviceMemory <= 2 ||
+    (isSmallScreen && isCoarsePointer)
+  );
+}
+
+function scheduleNextPreload() {
+  const delay = isConstrainedClient() ? 600 : 120;
+  window.setTimeout(processPreloadQueue, delay);
+}
+
 // 后台预加载处理函数
 function processPreloadQueue() {
+  if (typeof window === 'undefined') return;
   if (isPreloading || preloadQueue.length === 0) return;
   
   isPreloading = true;
@@ -40,13 +70,11 @@ function processPreloadQueue() {
     // 预加载成功，标记为已加载 display
     imageCache.markLoaded(photoId, 'display');
     isPreloading = false;
-    // 延迟处理下一个，避免占用太多带宽
-    setTimeout(processPreloadQueue, 100);
+    scheduleNextPreload();
   };
   img.onerror = () => {
     isPreloading = false;
-    // 失败了也继续处理下一个
-    setTimeout(processPreloadQueue, 100);
+    scheduleNextPreload();
   };
   img.src = url;
 }
@@ -107,10 +135,12 @@ export const imageCache = {
    * @param displayUrl display 质量的 URL
    */
   queuePreload(photoId: string, displayUrl: string) {
+    if (isConstrainedClient()) return;
     // 如果已经加载过高清图，或者已在队列中，跳过
     if (imageCache.hasHighQuality(photoId) || pendingPreload.has(photoId)) {
       return;
     }
+    if (preloadQueue.length > 12) return;
     pendingPreload.add(photoId);
     preloadQueue.push({ photoId, url: displayUrl });
     // 启动预加载处理

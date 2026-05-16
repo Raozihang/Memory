@@ -23,8 +23,9 @@ try {
     read(key) {
       return fs.readFileSync(path.join(base, key))
     },
-    getSignedUrl(key) {
-      return `/api/files/${encodeURIComponent(key)}`
+    getSignedUrl(key, options = {}) {
+      const suffix = options.downloadName ? '?download=1' : ''
+      return `/api/files/${encodeURIComponent(key)}${suffix}`
     },
     filePath(key) {
       return path.join(base, key)
@@ -58,10 +59,11 @@ module.exports = {
     if (provider.exists) return provider.exists(normalizedKey)
     return Promise.resolve(fs.existsSync(this.filePath(normalizedKey)))
   },
-  getSignedUrl(key) {
+  getSignedUrl(key, options = {}) {
     const normalizedKey = normalizeKey(key)
-    if (provider.getSignedUrl) return provider.getSignedUrl(normalizedKey)
-    return `/api/files/${encodeURIComponent(normalizedKey)}`
+    if (provider.getSignedUrl) return provider.getSignedUrl(normalizedKey, options)
+    const suffix = options.downloadName ? '?download=1' : ''
+    return `/api/files/${encodeURIComponent(normalizedKey)}${suffix}`
   },
   filePath(key) {
     const normalizedKey = normalizeKey(key)

@@ -13,7 +13,7 @@ interface PhotoCardProps {
 
 export function PhotoCard({ photo, onClick, className, variant = 'masonry', aspectRatio }: PhotoCardProps) {
   const [loaded, setLoaded] = useState(false);
-  const [fallbackLevel, setFallbackLevel] = useState(0); // 0: thumb, 1: medium, 2: display, 3: original
+  const [fallbackLevel, setFallbackLevel] = useState(0); // 0: thumb/srcset, 1: medium, 2: display, 3: original
   const [naturalAspect, setNaturalAspect] = useState<number | null>(null);
   const isGrid = variant === 'grid';
   const isJustified = variant === 'justified';
@@ -26,9 +26,9 @@ export function PhotoCard({ photo, onClick, className, variant = 'masonry', aspe
   // 根据 fallback 级别选择图片源
   const getCurrentSrc = useCallback(() => {
     switch (fallbackLevel) {
-      case 0: return displayUrl;
-      case 1: return thumbUrl;
-      case 2: return mediumUrl;
+      case 0: return thumbUrl;
+      case 1: return mediumUrl;
+      case 2: return displayUrl;
       default: return originalUrl;
     }
   }, [fallbackLevel, thumbUrl, mediumUrl, displayUrl, originalUrl]);
@@ -37,7 +37,7 @@ export function PhotoCard({ photo, onClick, className, variant = 'masonry', aspe
   
   // 只有在没有 fallback 时才使用 srcSet
   const srcSet = fallbackLevel === 0 && thumbUrl !== mediumUrl 
-    ? `${thumbUrl} 320w, ${mediumUrl} 800w` 
+    ? `${thumbUrl} 320w, ${mediumUrl} 800w, ${displayUrl} 1280w`
     : undefined;
   const sizes = isJustified
     ? '(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw'
@@ -77,7 +77,7 @@ export function PhotoCard({ photo, onClick, className, variant = 'masonry', aspe
         sizes={srcSet ? sizes : undefined}
         alt={photo.filename}
         className={cn(
-          "transition-all duration-300 hover:scale-105",
+          "transition-all duration-300 md:hover:scale-105",
           isGrid ? "h-full w-full object-cover" : "",
           isJustified ? "h-full w-auto object-contain" : "",
           !isGrid && !isJustified ? "h-auto w-full" : "",
