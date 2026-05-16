@@ -1,7 +1,7 @@
 import { Album, Photo } from '@/lib/types';
 import { api } from '@/lib/api';
-import { Link } from 'react-router-dom';
 import { useState, useCallback } from 'react';
+import { InternalLink } from '@/components/InternalLink';
 
 interface AlbumCardProps {
   album: Album;
@@ -27,7 +27,7 @@ export function AlbumCard({ album, coverPhoto }: AlbumCardProps) {
   }, [fallbackLevel]);
 
   return (
-    <Link 
+    <InternalLink 
       to={`/album/${album.id}`}
       className="group relative block overflow-hidden rounded-2xl bg-card transition-all hover:scale-[1.02] hover:shadow-xl hover:shadow-primary/10"
     >
@@ -51,6 +51,6 @@ export function AlbumCard({ album, coverPhoto }: AlbumCardProps) {
         <h3 className="text-lg font-bold leading-tight">{album.title}</h3>
         <p className="mt-1 text-xs text-white/70 line-clamp-2">{album.description || '无描述'}</p>
       </div>
-    </Link>
+    </InternalLink>
   );
 }

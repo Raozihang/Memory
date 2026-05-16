@@ -30,10 +30,27 @@ const RAW_IMAGE_URL_MODE = String((import.meta as any)?.env?.VITE_IMAGE_URL_MODE
 const IMAGE_URL_MODE: ImageUrlMode = RAW_IMAGE_URL_MODE === 'api' ? 'api' : 'direct';
 const FALLBACK_ORIGIN = typeof window !== 'undefined' ? window.location.origin : '';
 
+async function fetchJson(input: RequestInfo | URL, init?: RequestInit) {
+  const res = await fetch(input, {
+    credentials: 'include',
+    ...init,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = typeof data?.error === 'string' ? data.error : `Request failed with status ${res.status}`;
+    const error = new Error(message) as Error & { status?: number; data?: unknown };
+    error.status = res.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+}
+
 export const api = {
   getPhotos: async (): Promise<Photo[]> => {
-    const res = await fetch('/api/photos');
-    const data = await res.json();
+    const data = await fetchJson('/api/photos');
     return data.items || [];
   },
   getPhotosPage: async (params: { albumId?: string; limit?: number; offset?: number; startTakenAt?: string; endTakenAt?: string }): Promise<PhotosPage> => {
@@ -43,26 +60,27 @@ export const api = {
     if (params.endTakenAt) qs.set('endTakenAt', params.endTakenAt);
     qs.set('limit', String(params.limit ?? 60));
     qs.set('offset', String(params.offset ?? 0));
-    const res = await fetch(`/api/photos?${qs.toString()}`);
-    return res.json();
+    return fetchJson(`/api/photos?${qs.toString()}`);
   },
   getAlbums: async (): Promise<Album[]> => {
-    const res = await fetch('/api/albums');
-    const data = await res.json();
+    const data = await fetchJson('/api/albums');
     return data.items || [];
   },
   getAlbumsWithCovers: async (): Promise<AlbumWithCover[]> => {
-    const res = await fetch('/api/albums?includeCover=1');
-    const data = await res.json();
+    const data = await fetchJson('/api/albums?includeCover=1');
     return data.items || [];
   },
   getTimeline: async (): Promise<TimelineResponse> => {
-    const res = await fetch('/api/timeline');
-    return res.json();
+    return fetchJson('/api/timeline');
   },
   getExif: async (id: string): Promise<ExifData> => {
-    const res = await fetch(`/api/photos/${id}/exif`);
-    return res.json();
+    return fetchJson(`/api/photos/${id}/exif`);
+  },
+  getPhotoDownloadUrl: (id: string) => {
+    return `/api/photos/${encodeURIComponent(id)}/download`;
+  },
+  exportAlbum: async (id: string): Promise<{ url: string; filename?: string }> => {
+    return fetchJson(`/api/albums/${encodeURIComponent(id)}/export`);
   },
   getImageUrl: (key: string) => {
     const encoded = encodeStorageKeyForPath(key);
@@ -79,19 +97,32 @@ export const api = {
     return joinUrl(IMAGE_CDN_BASE || FALLBACK_ORIGIN, `api/files/${encoded}`);
   },
   createAlbum: async (title: string, description: string) => {
-    const res = await fetch('/api/albums', {
+    return fetchJson('/api/albums', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, description })
     });
-    return res.json();
   },
   uploadPhoto: async (body: any) => {
-    const res = await fetch('/api/photos', {
+    return fetchJson('/api/photos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    return res.json();
-  }
+  },
+  getUploadSession: async (): Promise<{ authenticated: boolean; expiresAt?: string }> => {
+    return fetchJson('/api/upload-auth/session');
+  },
+  loginUpload: async (password: string): Promise<{ authenticated: boolean }> => {
+    return fetchJson('/api/upload-auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+  },
+  logoutUpload: async (): Promise<{ authenticated: boolean }> => {
+    return fetchJson('/api/upload-auth/logout', {
+      method: 'POST'
+    });
+  },
 };

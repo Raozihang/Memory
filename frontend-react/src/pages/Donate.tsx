@@ -1,6 +1,6 @@
-import { Link } from 'react-router-dom';
 import type { MouseEvent } from 'react';
 import { SEO } from '@/components/SEO';
+import { InternalLink } from '@/components/InternalLink';
 
 export default function DonatePage() {
   const wechatRemark = '#付款:饶zi(RZH_rao)/捐赠/002';
@@ -19,23 +19,23 @@ export default function DonatePage() {
 
   return (
     <div className="mx-auto max-w-3xl py-10">
-      <SEO title="捐赠" description="支持我们的网站运维" />
+      <SEO title="捐赠" description="支持我们的网站运维" image="/logo.png" />
       <h1 className="mb-4 text-3xl font-bold tracking-tight">捐赠</h1>
-      <p className="mb-6 text-muted-foreground leading-relaxed">
+      <p className="mb-6 leading-relaxed text-muted-foreground">
         感谢您对嘉祥记忆回廊的支持。您的捐赠将只用于网站运维、服务器资源购置以及后续功能迭代，
         帮助我们更好地保存与展示校园的珍贵记忆。
       </p>
 
       <div className="mb-8 rounded-2xl border border-border/60 bg-secondary/40 p-6">
         <h2 className="mb-3 text-xl font-semibold">捐赠方式</h2>
-        <p className="mb-4 text-sm text-muted-foreground leading-relaxed">
+        <p className="mb-4 text-sm leading-relaxed text-muted-foreground">
           目前仅支持通过微信进行捐赠。
         </p>
 
-        <div className="grid gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] items-center">
+        <div className="grid items-center gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
           <div>
             <h3 className="mb-2 text-sm font-medium">微信捐赠</h3>
-            <p className="mb-3 text-xs text-muted-foreground leading-relaxed">
+            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
               请使用微信扫
               <span className="md:hidden">下方</span>
               <span className="hidden md:inline">右侧</span>
@@ -57,7 +57,7 @@ export default function DonatePage() {
             <a
               href="weixin://"
               onClick={handleWeChatLinkClick}
-              className="text-[11px] text-primary underline underline-offset-2 break-all"
+              className="break-all text-[11px] text-primary underline underline-offset-2"
             >
               #付款:饶zi(RZH_rao)/捐赠/002
             </a>
@@ -68,20 +68,20 @@ export default function DonatePage() {
       <div className="flex items-center justify-between gap-4">
         <p className="text-xs text-muted-foreground">
           如需了解更多信息，可
-          <Link
+          <InternalLink
             to="/contact"
-            className="ml-1 underline underline-offset-2 text-primary hover:text-primary/80"
+            className="ml-1 text-primary underline underline-offset-2 hover:text-primary/80"
           >
             联系我们
-          </Link>
+          </InternalLink>
           。
         </p>
-        <Link
+        <InternalLink
           to="/"
           className="inline-flex items-center justify-center rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           返回首页
-        </Link>
+        </InternalLink>
       </div>
     </div>
   );

@@ -1,22 +1,23 @@
-import { Link } from 'react-router-dom';
 import { SEO } from '@/components/SEO';
+import { InternalLink } from '@/components/InternalLink';
 
 export default function ContactPage() {
   return (
     <div className="mx-auto max-w-3xl py-10">
-      <SEO title="联系我们" description="反馈问题或联系我们" />
+      <SEO title="联系我们" description="反馈问题或联系我们" image="/logo.png" />
       <h1 className="mb-4 text-3xl font-bold tracking-tight">联系我们</h1>
-      <p className="mb-4 text-muted-foreground leading-relaxed">
-        如有关于网站 BUG 反馈、希望新增功能、下架侵权照片或其它问题的反馈，欢迎与我们联系。
+      <p className="mb-4 leading-relaxed text-muted-foreground">
+        如有关于网站 BUG 反馈、希望新增功能、下架侵权照片或其他问题的反馈，欢迎与我们联系。
       </p>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 mb-8">
+
+      <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2">
         <div className="rounded-2xl border border-border/60 bg-secondary/40 p-6">
           <h2 className="mb-3 text-lg font-semibold">邮件联系</h2>
-          <p className="text-sm text-muted-foreground leading-relaxed">
+          <p className="text-sm leading-relaxed text-muted-foreground">
             你可以直接发送邮件至
             <a
               href="mailto:rzh@rzh.email"
-              className="mx-1 underline underline-offset-2 text-primary hover:text-primary/80"
+              className="mx-1 text-primary underline underline-offset-2 hover:text-primary/80"
             >
               rzh@rzh.email
             </a>
@@ -26,7 +27,7 @@ export default function ContactPage() {
 
         <div className="rounded-2xl border border-border/60 bg-secondary/40 p-6">
           <h2 className="mb-3 text-lg font-semibold">微信联系</h2>
-          <p className="mb-4 text-sm text-muted-foreground leading-relaxed">
+          <p className="mb-4 text-sm leading-relaxed text-muted-foreground">
             你也可以通过微信联系我们，备注来意。
           </p>
           <div className="flex flex-col items-center justify-center gap-2">
@@ -43,13 +44,14 @@ export default function ContactPage() {
           </div>
         </div>
       </div>
+
       <div className="flex items-center justify-between gap-4">
-        <Link
+        <InternalLink
           to="/"
           className="inline-flex items-center justify-center rounded-full bg-primary px-6 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           返回首页
-        </Link>
+        </InternalLink>
       </div>
     </div>
   );

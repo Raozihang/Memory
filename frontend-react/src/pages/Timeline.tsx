@@ -203,6 +203,7 @@ export default function Timeline() {
       <SEO 
         title="时间轴" 
         description="按时间顺序回顾所有美好的瞬间" 
+        image="/logo.png"
       />
       <div className="mx-auto max-w-6xl pb-40 md:pb-0">
       <div className={cn(

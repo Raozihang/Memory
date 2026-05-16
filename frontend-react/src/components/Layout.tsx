@@ -1,13 +1,16 @@
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Home, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLayout } from '@/lib/LayoutContext';
 import { BottomCapsuleDateTimeline } from '@/components/DraggableDateTimeline';
+import { InternalLink } from '@/components/InternalLink';
 
 export function Layout() {
   const location = useLocation();
   const { isViewerOpen, isImmersive, timelineCapsule } = useLayout();
+  const currentYear = new Date().getFullYear();
+  const copyrightYears = currentYear > 2025 ? `2025-${currentYear}` : '2025';
 
   const hideMobileCapsule = isViewerOpen || (isImmersive && location.pathname !== '/timeline');
   const showMobileCapsule = !hideMobileCapsule;
@@ -24,15 +27,15 @@ export function Layout() {
         isImmersive && "-translate-y-full"
       )}>
         <div className="container flex h-14 sm:h-16 items-center justify-between px-3 sm:px-4">
-          <Link to="/" className="flex items-center gap-2 text-xl font-bold tracking-tight">
+          <InternalLink to="/" className="flex items-center gap-2 text-xl font-bold tracking-tight">
             <span className="bg-gradient-to-b from-zinc-50 via-zinc-200 to-zinc-400 bg-clip-text text-transparent">
               记忆回廊
             </span>
-          </Link>
+          </InternalLink>
           
           <nav className="hidden md:flex items-center gap-4">
             {navItems.map((item) => (
-              <Link
+              <InternalLink
                 key={item.href}
                 to={item.href}
                 className={cn(
@@ -44,7 +47,7 @@ export function Layout() {
               >
                 <item.icon className="h-4 w-4" />
                 <span>{item.label}</span>
-              </Link>
+              </InternalLink>
             ))}
           </nav>
         </div>
@@ -70,7 +73,7 @@ export function Layout() {
                 transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
                 className="relative inline-flex items-center gap-2 max-w-[92vw] rounded-full bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl ring-1 ring-white/5 px-2.5 py-2"
               >
-                <Link
+                <InternalLink
                   to="/"
                   className={cn(
                     "flex items-center justify-center h-10 w-10 rounded-full transition-colors",
@@ -81,7 +84,7 @@ export function Layout() {
                   aria-label="首页"
                 >
                   <Home className={cn("h-5 w-5", location.pathname === '/' && "stroke-[2.5px]")} />
-                </Link>
+                </InternalLink>
 
                 <AnimatePresence mode="wait" initial={false}>
                   {location.pathname === '/timeline' && timelineCapsule ? (
@@ -112,7 +115,7 @@ export function Layout() {
                       exit={{ opacity: 0, x: -8 }}
                       transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
                     >
-                      <Link
+                      <InternalLink
                         to="/timeline"
                         className={cn(
                           "flex items-center justify-center h-10 w-10 rounded-full transition-colors",
@@ -123,7 +126,7 @@ export function Layout() {
                         aria-label="时间轴"
                       >
                         <Calendar className={cn("h-5 w-5", location.pathname === '/timeline' && "stroke-[2.5px]")} />
-                      </Link>
+                      </InternalLink>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -135,13 +138,13 @@ export function Layout() {
 
       <footer className="py-8 text-center text-sm text-muted-foreground pb-32 md:pb-8">
         <p>
-          © 2025 @WilliamRao. All rights reserved. ·{' '}
-          <Link
+          © {copyrightYears} @WilliamRao. All rights reserved. ·{' '}
+          <InternalLink
             to="/contact"
             className="underline underline-offset-2 hover:text-foreground"
           >
             联系我们
-          </Link>
+          </InternalLink>
         </p>
       </footer>
     </div>

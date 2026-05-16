@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { Coffee } from 'lucide-react';
 import { api } from '@/lib/api';
 import { AlbumCard } from '@/components/AlbumCard';
 import { SEO } from '@/components/SEO';
+import { InternalLink } from '@/components/InternalLink';
 
 export default function Home() {
   const { data: albums = [], isLoading: albumsLoading } = useQuery({ queryKey: ['albumsWithCovers'], queryFn: api.getAlbumsWithCovers });
@@ -64,13 +64,13 @@ export default function Home() {
             我们以统一的相册形式进行保存与呈现，确保资料长期、稳定与易于检索，让这些值得纪念的瞬间被妥善留存。
           </p>
           <div className="mt-8">
-            <Link 
+            <InternalLink 
               to="/donate"
               className="inline-flex items-center justify-center rounded-full bg-secondary/30 px-8 py-3 text-sm font-medium text-white shadow transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <Coffee className="mr-2 h-4 w-4" />
               捐赠
-            </Link>
+            </InternalLink>
           </div>
         </div>
       </div>

@@ -1,17 +1,20 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PhotoViewer } from '@/components/PhotoViewer';
 import { MasonryPhotoGrid } from '@/components/MasonryPhotoGrid';
-import { useState, useEffect, useMemo } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { ArrowLeft, Download, Loader } from 'lucide-react';
 import { SEO } from '@/components/SEO';
+import { InternalLink } from '@/components/InternalLink';
 
 export default function AlbumPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [viewerIndex, setViewerIndex] = useState<number>(-1);
   const [columnWidth, setColumnWidth] = useState(280);
+  const [exporting, setExporting] = useState(false);
+  const requestedPhotoId = searchParams.get('photo') || searchParams.get('photoId');
 
   // Responsive column width for masonry
   useEffect(() => {
@@ -51,10 +54,6 @@ export default function AlbumPage() {
 
   const album = albums.find(a => a.id === id);
 
-  if (!album && albums.length > 0) return <div>Album not found</div>;
-
-  const coverUrl = album?.cover_photo ? api.getPhotoUrl(album.cover_photo, 'medium') : undefined;
-
   const jsonLd = album ? {
     "@context": "https://schema.org",
     "@type": "ImageGallery",
@@ -64,31 +63,107 @@ export default function AlbumPage() {
     "image": photos.slice(0, 3).map(p => api.getPhotoUrl(p, 'medium'))
   } : undefined;
 
+  const startDownload = (url: string, filename?: string) => {
+    const link = document.createElement('a');
+    link.href = url;
+    if (filename) link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleBatchDownload = async () => {
+    if (!id || exporting) return;
+    setExporting(true);
+    try {
+      const result = await api.exportAlbum(id);
+      startDownload(result.url, result.filename);
+    } catch (error) {
+      console.error(error);
+      alert('批量下载准备失败，请稍后重试');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!requestedPhotoId) return;
+
+    const photoIndex = photos.findIndex(photo => photo.id === requestedPhotoId);
+    if (photoIndex >= 0) {
+      if (viewerIndex !== photoIndex) setViewerIndex(photoIndex);
+      return;
+    }
+
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [requestedPhotoId, photos, viewerIndex, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const updatePhotoParam = useCallback((photoId: string, replace = true) => {
+    const next = new URLSearchParams(searchParams);
+    const currentPhotoId = next.get('photo') || next.get('photoId');
+    if (currentPhotoId === photoId && next.has('photo') && !next.has('photoId')) return;
+
+    next.set('photo', photoId);
+    next.delete('photoId');
+    setSearchParams(next, { replace });
+  }, [searchParams, setSearchParams]);
+
+  const handlePhotoClick = useCallback((photoIndex: number) => {
+    setViewerIndex(photoIndex);
+    const clickedPhoto = photos[photoIndex];
+    if (clickedPhoto) updatePhotoParam(clickedPhoto.id, false);
+  }, [photos, updatePhotoParam]);
+
+  const handleViewerIndexChange = useCallback((photoIndex: number, photo: { id: string }) => {
+    setViewerIndex(photoIndex);
+    updatePhotoParam(photo.id, true);
+  }, [updatePhotoParam]);
+
+  const handleViewerClose = useCallback(() => {
+    setViewerIndex(-1);
+    const next = new URLSearchParams(searchParams);
+    next.delete('photo');
+    next.delete('photoId');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  if (!album && albums.length > 0) return <div>Album not found</div>;
+
   return (
     <div className="min-h-screen">
       <SEO 
         title={album?.title} 
         description={album?.description || `查看 ${album?.title || '相册'} 中的照片`}
-        image={coverUrl}
+        image="/logo.png"
         jsonLd={jsonLd}
       />
       <div className="mb-8 flex items-center gap-4">
-        <button 
-          onClick={() => navigate('/')}
+        <InternalLink
+          to="/"
           className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary/50 hover:bg-secondary"
         >
           <ArrowLeft className="h-5 w-5" />
-        </button>
-        <div>
-          <h1 className="text-3xl font-bold">{album?.title || 'Loading...'}</h1>
-          <p className="text-muted-foreground">{album?.description}</p>
+        </InternalLink>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-3xl font-bold">{album?.title || 'Loading...'}</h1>
+          <p className="truncate text-muted-foreground">{album?.description}</p>
         </div>
+        <button
+          onClick={handleBatchDownload}
+          disabled={exporting || photos.length === 0}
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-secondary/70 px-4 text-sm font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {exporting ? <Loader className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          <span className="hidden sm:inline">{exporting ? '正在打包' : '批量下载'}</span>
+        </button>
       </div>
 
       <MasonryPhotoGrid 
         photos={photos} 
         columnWidth={columnWidth}
-        onClickPhoto={setViewerIndex}
+        onClickPhoto={handlePhotoClick}
       />
 
       {hasNextPage && (
@@ -107,7 +182,8 @@ export default function AlbumPage() {
         <PhotoViewer
           photos={photos}
           initialIndex={viewerIndex}
-          onClose={() => setViewerIndex(-1)}
+          onClose={handleViewerClose}
+          onIndexChange={handleViewerIndexChange}
           onLoadMore={() => fetchNextPage()}
           hasMore={hasNextPage}
           loadingMore={isFetchingNextPage}

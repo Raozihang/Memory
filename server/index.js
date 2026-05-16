@@ -2,7 +2,7 @@ const http = require('http')
 const fs = require('fs')
 const path = require('path')
 const { URL } = require('url')
-const { spawnSync } = require('child_process')
+const crypto = require('crypto')
 const zlib = require('zlib')
 require('dotenv').config({ path: path.join(__dirname, '.env') })
 const dao = require('./dao')
@@ -20,6 +20,29 @@ const PORT = process.env.PORT || 8080
 const ROOT_DIR = path.resolve(__dirname, '..')
 const DATA_DIR = path.join(__dirname, 'data')
 const STORAGE_DIR = path.join(__dirname, 'storage')
+const UPLOAD_PASSWORD = process.env.UPLOAD_PASSWORD || 'jx2024'
+const SESSION_SECRET = process.env.UPLOAD_SESSION_SECRET || process.env.SESSION_SECRET || 'change-this-upload-session-secret'
+const SESSION_COOKIE_NAME = 'album_upload_session'
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7
+const SITE_TITLE = '记忆回廊'
+const SITE_DESCRIPTION = '嘉祥记忆回廊 JX Memory - 记录嘉祥高2024级的美好回忆'
+const STATIC_ROUTE_SHARE_META = {
+  '/contact': {
+    title: `联系我们 | ${SITE_TITLE}`,
+    description: '反馈问题或联系我们',
+    imagePath: '/logo.png'
+  },
+  '/donate': {
+    title: `捐赠 | ${SITE_TITLE}`,
+    description: '支持我们的网站运维',
+    imagePath: '/logo.png'
+  },
+  '/timeline': {
+    title: `时间轴 | ${SITE_TITLE}`,
+    description: '按时间顺序回顾所有美好的瞬间',
+    imagePath: '/logo.png'
+  }
+}
 
 // Storage Module
 let storage
@@ -156,7 +179,335 @@ function sendJson(res, obj, statusCode = 200) {
   res.end(JSON.stringify(obj))
 }
 
-function sendFile(p, mime, req, res) {
+function toBase64Url(value) {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+function fromBase64Url(value) {
+  const normalized = String(value || '')
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4))
+  return Buffer.from(`${normalized}${padding}`, 'base64').toString('utf8')
+}
+
+function parseCookies(req) {
+  const header = String(req.headers.cookie || '')
+  const cookies = {}
+  for (const item of header.split(';')) {
+    const trimmed = item.trim()
+    if (!trimmed) continue
+    const idx = trimmed.indexOf('=')
+    const key = idx >= 0 ? trimmed.slice(0, idx).trim() : trimmed
+    const value = idx >= 0 ? trimmed.slice(idx + 1).trim() : ''
+    cookies[key] = decodeURIComponent(value)
+  }
+  return cookies
+}
+
+function signSessionPayload(payload) {
+  return crypto
+    .createHmac('sha256', SESSION_SECRET)
+    .update(payload)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+function createUploadSessionToken() {
+  const payload = JSON.stringify({ exp: Date.now() + SESSION_TTL_MS })
+  const encodedPayload = toBase64Url(payload)
+  const signature = signSessionPayload(encodedPayload)
+  return `${encodedPayload}.${signature}`
+}
+
+function readUploadSession(req) {
+  const token = parseCookies(req)[SESSION_COOKIE_NAME]
+  if (!token) return null
+
+  const parts = token.split('.')
+  if (parts.length !== 2) return null
+
+  const [encodedPayload, signature] = parts
+  const expectedSignature = signSessionPayload(encodedPayload)
+  if (signature.length !== expectedSignature.length) return null
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) return null
+
+  try {
+    const payload = JSON.parse(fromBase64Url(encodedPayload))
+    if (!payload || typeof payload.exp !== 'number' || payload.exp <= Date.now()) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
+function appendResponseHeader(res, name, value) {
+  const current = res.getHeader(name)
+  if (!current) {
+    res.setHeader(name, value)
+    return
+  }
+  if (Array.isArray(current)) {
+    res.setHeader(name, current.concat(value))
+    return
+  }
+  res.setHeader(name, [current, value])
+}
+
+function setCookie(res, name, value, options = {}) {
+  const parts = [`${name}=${encodeURIComponent(value)}`]
+  parts.push(`Path=${options.path || '/'}`)
+  if (typeof options.maxAge === 'number') parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`)
+  if (options.httpOnly !== false) parts.push('HttpOnly')
+  parts.push(`SameSite=${options.sameSite || 'Lax'}`)
+  if (options.secure) parts.push('Secure')
+  appendResponseHeader(res, 'Set-Cookie', parts.join('; '))
+}
+
+function clearCookie(res, name) {
+  setCookie(res, name, '', { maxAge: 0 })
+}
+
+function requireUploadAuth(req, res) {
+  const session = readUploadSession(req)
+  if (!session) {
+    sendJson(res, { error: 'unauthorized' }, 401)
+    return null
+  }
+  return session
+}
+
+function encodeStorageKeyForPath(key) {
+  return String(key || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(seg => encodeURIComponent(seg))
+    .join('/')
+}
+
+function encodeRFC5987ValueChars(value) {
+  return encodeURIComponent(value)
+    .replace(/['()]/g, escape)
+    .replace(/\*/g, '%2A')
+}
+
+function contentDisposition(filename, disposition = 'attachment') {
+  const basename = path.basename(String(filename || 'download'))
+  const fallback = basename
+    .replace(/[^\x20-\x7E]/g, '_')
+    .replace(/["\\]/g, '_') || 'download'
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeRFC5987ValueChars(basename)}`
+}
+
+function sendBuffer(buffer, mime, req, res, options = {}) {
+  res.setHeader('Content-Type', mime || 'application/octet-stream')
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Cache-Control', 'private, max-age=0')
+  res.setHeader('Content-Length', buffer.length)
+  if (options.downloadName) {
+    res.setHeader('Content-Disposition', contentDisposition(options.downloadName))
+  }
+  if (req.method === 'HEAD') return res.end()
+  return res.end(buffer)
+}
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let i = 0; i < 256; i += 1) {
+    let c = i
+    for (let j = 0; j < 8; j += 1) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)
+    }
+    table[i] = c >>> 0
+  }
+  return table
+})()
+
+function crc32(buffer) {
+  let c = 0xFFFFFFFF
+  for (const byte of buffer) {
+    c = CRC32_TABLE[(c ^ byte) & 0xFF] ^ (c >>> 8)
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0
+}
+
+function getDosDateTime(date = new Date()) {
+  const d = Number.isNaN(date.getTime()) ? new Date() : date
+  const year = Math.max(1980, d.getFullYear())
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2)
+  const dosDate = ((year - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()
+  return { dosTime, dosDate }
+}
+
+function sanitizeZipFilename(filename, fallback) {
+  const cleaned = path.basename(String(filename || fallback || 'photo'))
+    .replace(/[\x00-\x1F<>:"\\|?*]/g, '_')
+    .trim()
+  return cleaned || fallback || 'photo'
+}
+
+function uniqueZipFilename(filename, usedNames) {
+  const parsed = path.parse(filename)
+  let candidate = filename
+  let i = 2
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${parsed.name || 'photo'} (${i})${parsed.ext || ''}`
+    i += 1
+  }
+  usedNames.add(candidate.toLowerCase())
+  return candidate
+}
+
+function assertZipSize(value, label) {
+  if (value > 0xFFFFFFFF) {
+    throw new Error(`${label} is too large for standard ZIP`)
+  }
+}
+
+function writeZipBuffer(fd, buffer, state) {
+  fs.writeSync(fd, buffer, 0, buffer.length, state.offset)
+  state.offset += buffer.length
+}
+
+function writeZipUInt16(value) {
+  const buffer = Buffer.alloc(2)
+  buffer.writeUInt16LE(value)
+  return buffer
+}
+
+function writeZipUInt32(value) {
+  const buffer = Buffer.alloc(4)
+  buffer.writeUInt32LE(value >>> 0)
+  return buffer
+}
+
+async function createAlbumZipFile(albumPhotos, zipPath) {
+  const usedNames = new Set()
+  const centralDirectory = []
+  const state = { offset: 0 }
+  const fd = fs.openSync(zipPath, 'w')
+  let included = 0
+  let skipped = 0
+
+  try {
+    if (albumPhotos.length > 0xFFFF) {
+      throw new Error('Too many files for standard ZIP')
+    }
+
+    for (const photo of albumPhotos) {
+      let body
+      try {
+        body = await storage.read(photo.storage_key)
+      } catch (e) {
+        skipped += 1
+        console.error('Export read failed:', photo.storage_key, e)
+        continue
+      }
+
+      if (!Buffer.isBuffer(body)) body = Buffer.from(body || [])
+      if (!body.length) {
+        skipped += 1
+        continue
+      }
+
+      assertZipSize(body.length, photo.filename || photo.id)
+      const entryName = uniqueZipFilename(
+        sanitizeZipFilename(photo.filename, `${photo.id || included + 1}.jpg`),
+        usedNames
+      )
+      const nameBuffer = Buffer.from(entryName, 'utf8')
+      const checksum = crc32(body)
+      const { dosTime, dosDate } = getDosDateTime(photo.taken_at ? new Date(photo.taken_at) : new Date())
+      const localHeaderOffset = state.offset
+
+      const localHeader = Buffer.concat([
+        writeZipUInt32(0x04034B50),
+        writeZipUInt16(20),
+        writeZipUInt16(0x0800),
+        writeZipUInt16(0),
+        writeZipUInt16(dosTime),
+        writeZipUInt16(dosDate),
+        writeZipUInt32(checksum),
+        writeZipUInt32(body.length),
+        writeZipUInt32(body.length),
+        writeZipUInt16(nameBuffer.length),
+        writeZipUInt16(0),
+        nameBuffer
+      ])
+
+      writeZipBuffer(fd, localHeader, state)
+      writeZipBuffer(fd, body, state)
+
+      centralDirectory.push({
+        nameBuffer,
+        checksum,
+        size: body.length,
+        dosTime,
+        dosDate,
+        localHeaderOffset
+      })
+      included += 1
+    }
+
+    const centralDirectoryOffset = state.offset
+    for (const entry of centralDirectory) {
+      assertZipSize(entry.localHeaderOffset, entry.nameBuffer.toString('utf8'))
+      const header = Buffer.concat([
+        writeZipUInt32(0x02014B50),
+        writeZipUInt16(20),
+        writeZipUInt16(20),
+        writeZipUInt16(0x0800),
+        writeZipUInt16(0),
+        writeZipUInt16(entry.dosTime),
+        writeZipUInt16(entry.dosDate),
+        writeZipUInt32(entry.checksum),
+        writeZipUInt32(entry.size),
+        writeZipUInt32(entry.size),
+        writeZipUInt16(entry.nameBuffer.length),
+        writeZipUInt16(0),
+        writeZipUInt16(0),
+        writeZipUInt16(0),
+        writeZipUInt16(0),
+        writeZipUInt32(0),
+        writeZipUInt32(entry.localHeaderOffset),
+        entry.nameBuffer
+      ])
+      writeZipBuffer(fd, header, state)
+    }
+
+    const centralDirectorySize = state.offset - centralDirectoryOffset
+    assertZipSize(centralDirectorySize, 'central directory')
+    assertZipSize(centralDirectoryOffset, 'central directory offset')
+
+    const endRecord = Buffer.concat([
+      writeZipUInt32(0x06054B50),
+      writeZipUInt16(0),
+      writeZipUInt16(0),
+      writeZipUInt16(included),
+      writeZipUInt16(included),
+      writeZipUInt32(centralDirectorySize),
+      writeZipUInt32(centralDirectoryOffset),
+      writeZipUInt16(0)
+    ])
+    writeZipBuffer(fd, endRecord, state)
+  } finally {
+    fs.closeSync(fd)
+  }
+
+  if (included === 0 && fs.existsSync(zipPath)) {
+    fs.unlinkSync(zipPath)
+  }
+
+  return { included, skipped }
+}
+
+function sendFile(p, mime, req, res, options = {}) {
   if (!fs.existsSync(p)) {
     res.statusCode = 404
     return res.end('File not found')
@@ -169,6 +520,9 @@ function sendFile(p, mime, req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Accept-Ranges', 'bytes')
   res.setHeader('ETag', etag)
+  if (options.downloadName) {
+    res.setHeader('Content-Disposition', contentDisposition(options.downloadName))
+  }
   
   const longCache = 'public, max-age=31536000, immutable'
   const noCache = 'no-cache'
@@ -255,6 +609,192 @@ function parseBody(req) {
   })
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function getRequestOrigin(req) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim()
+  const host = String(req.headers.host || '')
+  const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)
+  let protocol = forwardedProto || (req.socket && req.socket.encrypted ? 'https' : 'http')
+  if (!isLocalHost && protocol === 'http') protocol = 'https'
+  return `${protocol}://${req.headers.host}`
+}
+
+function toAbsoluteUrl(origin, value) {
+  if (!value) return ''
+  if (/^https?:\/\//i.test(value)) return value
+  if (value.startsWith('//')) return `https:${value}`
+  return new URL(value, `${origin}/`).toString()
+}
+
+function encodeStorageKeyForPath(key) {
+  return String(key || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(seg => encodeURIComponent(seg))
+    .join('/')
+}
+
+function injectShareMeta(html, meta) {
+  const sanitized = [
+    /<title>[\s\S]*?<\/title>\s*/i,
+    /<meta\s+name=["']description["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:title["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:description["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:image["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:image:secure_url["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:image:type["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:image:width["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:image:height["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:url["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:site_name["'][^>]*>\s*/ig,
+    /<meta\s+property=["']og:type["'][^>]*>\s*/ig,
+    /<meta\s+name=["']twitter:card["'][^>]*>\s*/ig,
+    /<meta\s+name=["']twitter:title["'][^>]*>\s*/ig,
+    /<meta\s+name=["']twitter:description["'][^>]*>\s*/ig,
+    /<meta\s+name=["']twitter:image["'][^>]*>\s*/ig,
+    /<link\s+rel=["']canonical["'][^>]*>\s*/ig
+  ].reduce((acc, pattern) => acc.replace(pattern, ''), html)
+
+  const shareBlock = [
+    `    <meta name="description" content="${escapeHtml(meta.description)}" />`,
+    `    <meta property="og:title" content="${escapeHtml(meta.title)}" />`,
+    `    <meta property="og:description" content="${escapeHtml(meta.description)}" />`,
+    `    <meta property="og:image" content="${escapeHtml(meta.imageUrl)}" />`,
+    `    <meta property="og:image:secure_url" content="${escapeHtml(meta.imageUrl)}" />`,
+    `    <meta property="og:image:type" content="${escapeHtml(meta.imageType || 'image/png')}" />`,
+    `    <meta property="og:image:width" content="${escapeHtml(String(meta.imageWidth || 1200))}" />`,
+    `    <meta property="og:image:height" content="${escapeHtml(String(meta.imageHeight || 630))}" />`,
+    `    <meta property="og:url" content="${escapeHtml(meta.url)}" />`,
+    `    <meta property="og:site_name" content="${escapeHtml(SITE_TITLE)}" />`,
+    '    <meta property="og:type" content="website" />',
+    '    <meta name="twitter:card" content="summary_large_image" />',
+    `    <meta name="twitter:title" content="${escapeHtml(meta.title)}" />`,
+    `    <meta name="twitter:description" content="${escapeHtml(meta.description)}" />`,
+    `    <meta name="twitter:image" content="${escapeHtml(meta.imageUrl)}" />`,
+    `    <link rel="canonical" href="${escapeHtml(meta.url)}" />`,
+    `    <title>${escapeHtml(meta.title)}</title>`
+  ].join('\n')
+
+  const withHead = sanitized.replace(/<\/head>/i, `${shareBlock}\n  </head>`)
+  const shareImageBlock = `\n    <div style="position:absolute;width:0;height:0;overflow:hidden;opacity:0;">\n      <img src="${escapeHtml(meta.imageUrl)}" alt="share-cover" width="1200" height="630" />\n    </div>`
+  return withHead.replace(/<\/body>/i, `${shareImageBlock}\n  </body>`)
+}
+
+function normalizeRoutePath(pathname) {
+  if (!pathname || pathname === '/') return '/'
+  return pathname.replace(/\/+$/, '') || '/'
+}
+
+async function buildAlbumRouteShareMeta(origin, albumId, routePath = null) {
+  const album = await dao.getAlbum(albumId)
+  if (!album) return null
+
+  return {
+    title: `${album.title} | ${SITE_TITLE}`,
+    description: album.description || `查看 ${album.title} 中的照片`,
+    imageUrl: toAbsoluteUrl(origin, '/logo.png'),
+    imageType: 'image/png',
+    imageWidth: 1200,
+    imageHeight: 630,
+    url: toAbsoluteUrl(origin, routePath || `/album/${album.id}`)
+  }
+}
+
+async function resolveRouteShareMeta(normalizedPathname, origin) {
+  const staticMeta = STATIC_ROUTE_SHARE_META[normalizedPathname]
+  if (staticMeta) {
+    return {
+      title: staticMeta.title,
+      description: staticMeta.description,
+      imageUrl: toAbsoluteUrl(origin, staticMeta.imagePath),
+      imageType: /\.png$/i.test(staticMeta.imagePath) ? 'image/png' : 'image/jpeg',
+      imageWidth: 1200,
+      imageHeight: 630,
+      url: toAbsoluteUrl(origin, normalizedPathname)
+    }
+  }
+
+  const albumMatch = normalizedPathname.match(/^\/album\/([a-z0-9]+)$/)
+  if (albumMatch) {
+    return await buildAlbumRouteShareMeta(origin, albumMatch[1], normalizedPathname)
+  }
+
+  return null
+}
+
+async function getAlbumShareCoverPhotos() {
+  const albums = await dao.getAlbums()
+  if (!albums || albums.length === 0) return []
+
+  const albumIds = albums.map(a => a.id)
+  const latestByAlbum = await dao.getLatestPhotoPerAlbum(albumIds)
+  const latestMap = new Map(latestByAlbum.map(p => [p.album_id, p]))
+
+  const coverIds = albums.map(a => a.cover_photo_id).filter(Boolean)
+  const configuredCoverPhotos = coverIds.length > 0 ? await dao.getPhotosByIds(coverIds) : []
+  const configuredMap = new Map(configuredCoverPhotos.map(p => [p.id, p]))
+
+  const selected = []
+  const seenPhotoIds = new Set()
+  for (const album of albums) {
+    const photo = (album.cover_photo_id && configuredMap.get(album.cover_photo_id)) || latestMap.get(album.id) || null
+    if (!photo) continue
+    if (seenPhotoIds.has(photo.id)) continue
+    seenPhotoIds.add(photo.id)
+    selected.push(photo)
+  }
+
+  return selected
+}
+
+async function backfillAlbumShareCovers({ limit = null } = {}) {
+  const photos = await getAlbumShareCoverPhotos()
+  const targetPhotos = limit ? photos.slice(0, Math.max(0, Number(limit) || 0)) : photos
+  if (targetPhotos.length === 0) {
+    return { totalAlbums: 0, processed: 0, created: 0, skipped: 0, failed: 0 }
+  }
+
+  const derivatives = await dao.getDerivativesByPhotoIds(targetPhotos.map(p => p.id))
+  const derivativeMap = new Map()
+  for (const d of derivatives) {
+    if (!derivativeMap.has(d.photo_id)) derivativeMap.set(d.photo_id, [])
+    derivativeMap.get(d.photo_id).push(d)
+  }
+
+  let created = 0
+  let skipped = 0
+  let failed = 0
+
+  for (const photo of targetPhotos) {
+    const existing = derivativeMap.get(photo.id) || []
+    const alreadyHasShare = Boolean(getDerivativeKeyByType(existing, 'share'))
+    if (alreadyHasShare) {
+      skipped += 1
+      continue
+    }
+
+    const result = await ensureShareDerivative(photo, existing)
+    if (result?.key) created += 1
+    else failed += 1
+  }
+
+  return {
+    totalAlbums: photos.length,
+    processed: targetPhotos.length,
+    created,
+    skipped,
+    failed
+  }
+}
+
 function buildDerivativeIndex(derivatives) {
   const index = new Map()
   for (const d of derivatives || []) {
@@ -276,6 +816,53 @@ function withDerivativeKeys(photo, dIndex) {
     display_key: displayKey,
     thumb_key: d.thumb || displayKey || photo.storage_key,
     medium_key: d.medium || displayKey || photo.storage_key
+  }
+}
+
+function getDerivativeKeyByType(derivatives, type) {
+  const item = (derivatives || []).find(d => d.type === type)
+  return item ? item.storage_key : null
+}
+
+function getShareDerivativeKey(id, filename) {
+  const baseName = path.parse(filename || `${id}`).name
+  return `derivatives/${id}-share-${baseName}.jpg`
+}
+
+async function readStorageBuffer(key) {
+  const localPath = storage.filePath(key)
+  if (localPath && fs.existsSync(localPath)) {
+    return fs.readFileSync(localPath)
+  }
+  return await storage.read(key)
+}
+
+async function ensureShareDerivative(photo, existingDerivatives = []) {
+  if (!photo) return null
+
+  const existingShare = getDerivativeKeyByType(existingDerivatives, 'share')
+  if (existingShare) {
+    return { key: existingShare, mime: 'image/jpeg' }
+  }
+
+  if (!sharp) return null
+
+  try {
+    const sourceBuffer = await readStorageBuffer(photo.storage_key)
+    const shareKey = getShareDerivativeKey(photo.id, photo.filename)
+    const output = await sharp(sourceBuffer)
+      .rotate()
+      .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#ffffff' })
+      .jpeg({ quality: 76, progressive: true, mozjpeg: true })
+      .toBuffer()
+
+    await storage.save(shareKey, output, { contentType: 'image/jpeg' })
+    await dao.addDerivative({ photo_id: photo.id, type: 'share', storage_key: shareKey })
+    return { key: shareKey, mime: 'image/jpeg' }
+  } catch (e) {
+    console.error('Sharp error (share):', e)
+    return null
   }
 }
 
@@ -309,6 +896,18 @@ async function generateDerivatives(id, filename, originalPath, originalBuffer, d
 
   // 3. Generate with Sharp if available
   if (sharp) {
+    const shareKey = getShareDerivativeKey(id, filename)
+    try {
+      const out = await sharp(originalBuffer)
+        .rotate()
+        .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality: 76, progressive: true, mozjpeg: true })
+        .toBuffer()
+      await storage.save(shareKey, out, { contentType: 'image/jpeg' })
+      await dao.addDerivative({ photo_id: id, type: 'share', storage_key: shareKey })
+    } catch (e) { console.error('Sharp error (share):', e) }
+
     if (!keyDisplay) {
       const k = `derivatives/${id}-display-${baseName}.webp`
       try {
@@ -352,7 +951,44 @@ async function handleApiRequest(req, res, url) {
     })
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/upload-auth/session') {
+    const session = readUploadSession(req)
+    if (!session) return sendJson(res, { authenticated: false })
+    return sendJson(res, { authenticated: true, expiresAt: new Date(session.exp).toISOString() })
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/upload-auth/login') {
+    const body = await parseBody(req)
+    const password = String(body.password || '')
+
+    if (password !== UPLOAD_PASSWORD) {
+      clearCookie(res, SESSION_COOKIE_NAME)
+      return sendJson(res, { error: 'invalid password' }, 401)
+    }
+
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim()
+    setCookie(res, SESSION_COOKIE_NAME, createUploadSessionToken(), {
+      maxAge: SESSION_TTL_MS / 1000,
+      secure: forwardedProto === 'https'
+    })
+    return sendJson(res, { authenticated: true })
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/upload-auth/logout') {
+    clearCookie(res, SESSION_COOKIE_NAME)
+    return sendJson(res, { authenticated: false })
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/share-covers/backfill') {
+    if (!requireUploadAuth(req, res)) return
+    const body = await parseBody(req)
+    const limit = body.limit ?? url.searchParams.get('limit') ?? null
+    const summary = await backfillAlbumShareCovers({ limit })
+    return sendJson(res, { ok: summary.failed === 0, ...summary })
+  }
+
   if ((req.method === 'POST' || req.method === 'GET') && url.pathname === '/api/storage/migrateToCos') {
+    if (!requireUploadAuth(req, res)) return
     if (req.method === 'GET' && url.searchParams.get('run') !== '1') {
       return sendJson(res, { ok: false, error: 'use POST or add ?run=1 for GET' }, 400)
     }
@@ -427,14 +1063,22 @@ async function handleApiRequest(req, res, url) {
   if (req.method === 'GET' && url.pathname.startsWith('/api/files/')) {
     const key = decodeURIComponent(url.pathname.replace('/api/files/', ''))
     const localPath = path.join(STORAGE_DIR, key)
+    const shouldDownload = url.searchParams.get('download') === '1'
     
     if (fs.existsSync(localPath)) {
       const ext = path.extname(localPath).toLowerCase()
       const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
                  : ext === '.png' ? 'image/png'
                  : ext === '.webp' ? 'image/webp'
+                 : ext === '.zip' ? 'application/zip'
                  : 'application/octet-stream'
-      return sendFile(localPath, mime, req, res)
+      return sendFile(
+        localPath,
+        mime,
+        req,
+        res,
+        shouldDownload ? { downloadName: path.basename(localPath) } : {}
+      )
     }
 
     const signedUrl = storage.getSignedUrl(key)
@@ -477,6 +1121,7 @@ async function handleApiRequest(req, res, url) {
 
   // 4. Upload Photo
   if (req.method === 'POST' && url.pathname === '/api/photos') {
+    if (!requireUploadAuth(req, res)) return
     const body = await parseBody(req)
     const { albumId, filename, dataUrl, displayDataUrl, mediumDataUrl, thumbDataUrl, taken_at, exif } = body
     
@@ -556,6 +1201,7 @@ async function handleApiRequest(req, res, url) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/albums') {
+    if (!requireUploadAuth(req, res)) return
     const body = await parseBody(req)
     const { title, description } = body
     const id = Date.now().toString(36)
@@ -564,6 +1210,7 @@ async function handleApiRequest(req, res, url) {
   }
 
   if (req.method === 'PUT' && url.pathname.match(/^\/api\/albums\/([a-z0-9]+)$/)) {
+    if (!requireUploadAuth(req, res)) return
     const id = url.pathname.split('/')[3]
     const body = await parseBody(req)
     const updated = await dao.updateAlbum(id, body)
@@ -574,6 +1221,7 @@ async function handleApiRequest(req, res, url) {
   // 7. Album Photos (Add to album) - this might be redundant if we just set album_id on photo
   // But original code maintained a separate list.
   if (req.method === 'POST' && url.pathname.match(/^\/api\/albums\/([a-z0-9]+)\/photos$/)) {
+    if (!requireUploadAuth(req, res)) return
     const albumId = url.pathname.split('/')[3]
     const body = await parseBody(req)
     const { photo_id, ordering } = body
@@ -596,35 +1244,36 @@ async function handleApiRequest(req, res, url) {
     const albumId = url.pathname.split('/')[3]
     const photos = await dao.getPhotos()
     const albumPhotos = photos.filter(p => p.album_id === albumId)
+    if (albumPhotos.length === 0) {
+      return sendJson(res, { error: 'no photos to export' }, 404)
+    }
+
     const exportDir = path.join(STORAGE_DIR, 'exports')
     ensureDir(exportDir)
     
     const zipName = `album-${albumId}-${Date.now()}.zip`
     const zipPath = path.join(exportDir, zipName)
-    const tmpDir = path.join(STORAGE_DIR, 'tmp', `export-${albumId}-${Date.now()}`)
-    ensureDir(tmpDir)
-    
-    for (const p of albumPhotos) {
-      const dest = path.join(tmpDir, p.filename)
-      const src = path.join(STORAGE_DIR, p.storage_key)
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, dest)
-        continue
-      }
-      try {
-        const buf = await storage.read(p.storage_key)
-        fs.writeFileSync(dest, buf)
-      } catch {}
-    }
-    
+
+    let summary
     try {
-      // Using PowerShell for zipping on Windows
-      spawnSync('powershell', ['-NoProfile', '-Command', `Compress-Archive -Path '${tmpDir}/*' -DestinationPath '${zipPath}' -Force`])
+      summary = await createAlbumZipFile(albumPhotos, zipPath)
     } catch (e) {
       console.error('Zip generation failed:', e)
+      if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath)
+      return sendJson(res, { error: 'export failed' }, 500)
     }
-    
-    return sendJson(res, { url: `/api/files/${encodeURIComponent(path.relative(STORAGE_DIR, zipPath))}` })
+
+    if (!fs.existsSync(zipPath) || !summary || summary.included === 0) {
+      return sendJson(res, { error: 'export failed' }, 500)
+    }
+
+    const exportKey = path.relative(STORAGE_DIR, zipPath).replace(/\\/g, '/')
+    return sendJson(res, {
+      filename: zipName,
+      url: `/api/files/${encodeStorageKeyForPath(exportKey)}?download=1`,
+      included: summary.included,
+      skipped: summary.skipped
+    })
   }
 
   // 9. Downloads & Info
@@ -632,9 +1281,18 @@ async function handleApiRequest(req, res, url) {
     const id = url.pathname.split('/')[3]
     const p = await dao.getPhoto(id)
     if (!p) return sendJson(res, { error: 'not found' }, 404)
+    const downloadName = p.filename || path.basename(p.storage_key)
     const localPath = path.join(STORAGE_DIR, p.storage_key)
     if (fs.existsSync(localPath)) {
-      return sendFile(localPath, 'application/octet-stream', req, res)
+      return sendFile(localPath, p.mime || 'application/octet-stream', req, res, { downloadName })
+    }
+    try {
+      const buffer = await storage.read(p.storage_key)
+      if (buffer && buffer.length) {
+        return sendBuffer(buffer, p.mime || 'application/octet-stream', req, res, { downloadName })
+      }
+    } catch (e) {
+      console.error('Download read failed:', e)
     }
     const signedUrl = storage.getSignedUrl(p.storage_key)
     if (typeof signedUrl === 'string' && /^https?:\/\//i.test(signedUrl)) {
@@ -662,6 +1320,7 @@ async function handleApiRequest(req, res, url) {
 
   // 10. Sharing
   if (req.method === 'POST' && url.pathname === '/api/shares') {
+    if (!requireUploadAuth(req, res)) return
     const body = await parseBody(req)
     const { subject_type, subject_id, expires_at } = body
     const code = Math.random().toString(36).slice(2, 8)
@@ -680,9 +1339,10 @@ async function handleApiRequest(req, res, url) {
   return sendJson(res, { error: 'unknown api' }, 404)
 }
 
-function serveStatic(req, res, url) {
+async function serveStatic(req, res, url) {
   const dist = path.join(ROOT_DIR, 'frontend-react', 'dist')
   let staticPath = path.join(dist, url.pathname.replace(/^\//, ''))
+  const normalizedPathname = normalizeRoutePath(url.pathname)
   
   if (url.pathname === '/') staticPath = path.join(dist, 'index.html')
 
@@ -702,7 +1362,19 @@ function serveStatic(req, res, url) {
   // SPA Fallback
   if (req.method === 'GET' && !url.pathname.startsWith('/api') && !url.pathname.includes('.')) {
      const indexHtml = path.join(dist, 'index.html')
-     if (fs.existsSync(indexHtml)) return sendFile(indexHtml, 'text/html', req, res)
+     if (fs.existsSync(indexHtml)) {
+       const origin = getRequestOrigin(req)
+       const routeShareMeta = await resolveRouteShareMeta(normalizedPathname, origin)
+       if (routeShareMeta) {
+         const html = fs.readFileSync(indexHtml, 'utf8')
+         const rendered = injectShareMeta(html, routeShareMeta)
+         res.statusCode = 200
+         res.setHeader('Content-Type', 'text/html; charset=utf-8')
+         res.setHeader('Cache-Control', 'no-cache')
+         return res.end(rendered)
+       }
+       return sendFile(indexHtml, 'text/html', req, res)
+     }
   }
 
   res.statusCode = 404
@@ -713,20 +1385,87 @@ async function handleSharePage(req, res, url) {
   const code = url.pathname.split('/')[2]
   const shares = await dao.getShares()
   const s = shares.find(x => x.code === code)
-  
+
+  res.setHeader('Cache-Control', 'no-store')
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
-  
+
   if (!s) {
     res.statusCode = 404
     return res.end('分享不存在')
   }
-  
+
+  const origin = getRequestOrigin(req)
+  const shareUrl = toAbsoluteUrl(origin, `/s/${code}`)
+  const defaultImageUrl = toAbsoluteUrl(origin, '/logo.png')
+  let targetUrl = toAbsoluteUrl(origin, '/')
+  let title = SITE_TITLE
+  let description = SITE_DESCRIPTION
+  let imageUrl = defaultImageUrl
+  let imageType = 'image/png'
+
   if (s.subject_type === 'album') {
-    const a = await dao.getAlbum(s.subject_id)
-    return res.end(`<h1>分享相册：${a ? a.title : '未知'}</h1> <p>代码：${code}</p> <a href="/">返回</a>`)
+    const albumMeta = await buildAlbumRouteShareMeta(origin, s.subject_id)
+    if (albumMeta) {
+      title = albumMeta.title
+      description = albumMeta.description
+      imageUrl = albumMeta.imageUrl
+      imageType = albumMeta.imageType || imageType
+      targetUrl = toAbsoluteUrl(origin, `/album/${s.subject_id}`)
+    } else {
+      title = `${s.subject_type || '分享'} | ${SITE_TITLE}`
+    }
+  } else {
+    title = `${s.subject_type || '分享'} | ${SITE_TITLE}`
   }
-  
-  return res.end(`<h1>分享：${s.subject_type}</h1> <p>代码：${code}</p> <a href="/">返回</a>`)
+
+  const escapedTitle = escapeHtml(title)
+  const escapedDescription = escapeHtml(description)
+  const escapedShareUrl = escapeHtml(shareUrl)
+  const escapedImageUrl = escapeHtml(imageUrl)
+  const escapedTargetUrl = escapeHtml(targetUrl)
+
+  return res.end(`<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapedTitle}</title>
+    <meta name="description" content="${escapedDescription}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${escapedTitle}" />
+    <meta property="og:description" content="${escapedDescription}" />
+    <meta property="og:url" content="${escapedShareUrl}" />
+    <meta property="og:site_name" content="${SITE_TITLE}" />
+    <meta property="og:image" content="${escapedImageUrl}" />
+    <meta property="og:image:secure_url" content="${escapedImageUrl}" />
+    <meta property="og:image:type" content="${escapeHtml(imageType)}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapedTitle}" />
+    <meta name="twitter:description" content="${escapedDescription}" />
+    <meta name="twitter:image" content="${escapedImageUrl}" />
+    <link rel="icon" type="image/png" href="${escapeHtml(toAbsoluteUrl(origin, '/logo.png'))}" />
+  </head>
+  <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0f172a;color:#e2e8f0;font-family:'Segoe UI','PingFang SC',sans-serif;">
+    <div style="position:absolute;width:0;height:0;overflow:hidden;opacity:0;">
+      <img src="${escapedImageUrl}" alt="share-cover" width="1200" height="630" />
+    </div>
+    <main style="max-width:680px;padding:32px 24px;text-align:center;">
+      <h1 style="margin:0 0 12px;font-size:32px;">${escapedTitle}</h1>
+      <p style="margin:0 0 20px;color:#cbd5e1;line-height:1.7;">${escapedDescription}</p>
+      <p style="margin:0;color:#94a3b8;">正在跳转到页面，如果没有自动跳转，请点击下方链接。</p>
+      <p style="margin:20px 0 0;">
+        <a href="${escapedTargetUrl}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#f59e0b;color:#111827;text-decoration:none;font-weight:700;">打开页面</a>
+      </p>
+    </main>
+    <script>
+      window.setTimeout(function () {
+        window.location.replace(${JSON.stringify(targetUrl)});
+      }, 120);
+    </script>
+  </body>
+</html>`)
 }
 
 // --- Server Main Loop ---

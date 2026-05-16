@@ -6,10 +6,24 @@
     <meta name="msvalidate.01" content="D94550743F5E03A1AB4C8593D3E97A35" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="description" content="嘉祥记忆回廊 JX Memory - 记录嘉祥高2024级的美好回忆" />
+    
+    <!-- WeChat Sharing & Open Graph -->
+    <meta property="og:title" content="记忆回廊" />
+    <meta property="og:description" content="嘉祥记忆回廊 JX Memory - 记录嘉祥高2024级的美好回忆" />
+    <meta property="og:image" content="/logo.png" />
+    <meta property="og:type" content="website" />
+    
     <title>记忆回廊</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- WeChat Sharing Image Trick (300x300+) -->
+    <div style="position: absolute; width: 0px; height: 0px; overflow: hidden; opacity: 0;">
+      <img src="/logo.png" alt="logo" />
+    </div>
+    <div id="root">
+      <h1 style="display: none;">嘉祥记忆回廊 JX Memory</h1>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

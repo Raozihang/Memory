@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef, type CSSProperties } from 'react';
 import { Photo } from '@/lib/types';
 import { api } from '@/lib/api';
 import { X, ChevronLeft, ChevronRight, Info, Download, Loader, ZoomOut } from 'lucide-react';
@@ -20,12 +20,13 @@ interface PhotoViewerProps {
   photos: Photo[];
   initialIndex: number;
   onClose: () => void;
+  onIndexChange?: (index: number, photo: Photo) => void;
   onLoadMore?: () => void;
   hasMore?: boolean;
   loadingMore?: boolean;
 }
 
-export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore, loadingMore }: PhotoViewerProps) {
+export function PhotoViewer({ photos, initialIndex, onClose, onIndexChange, onLoadMore, hasMore, loadingMore }: PhotoViewerProps) {
   const { setViewerOpen } = useLayout();
   const [index, setIndex] = useState(initialIndex);
   const [direction, setDirection] = useState(0);
@@ -55,6 +56,16 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
   const mediumUrl = useMemo(() => api.getPhotoUrl(photo, 'medium'), [photo]);
   const displayUrl = useMemo(() => api.getPhotoUrl(photo, 'display'), [photo]);
   const originalUrl = useMemo(() => api.getPhotoUrl(photo, 'original'), [photo]);
+  const downloadUrl = useMemo(() => api.getPhotoDownloadUrl(photo.id), [photo.id]);
+  const weChatImageStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!isWeChatEnv) return undefined;
+    return {
+      WebkitTouchCallout: 'default',
+      WebkitUserSelect: 'auto',
+      userSelect: 'auto',
+      touchAction: 'auto',
+    };
+  }, [isWeChatEnv]);
   
   // 根据 fallback 级别选择预览图：display -> medium -> original
   const previewUrl = useMemo(() => {
@@ -130,6 +141,10 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
       transformComponentRef.current.resetTransform();
     }
   }, [index, photo.id]);
+
+  useEffect(() => {
+    onIndexChange?.(index, photo);
+  }, [index, photo, onIndexChange]);
 
   // 预览图加载失败时的降级处理：display -> medium -> original
   const handlePreviewError = useCallback(() => {
@@ -262,7 +277,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm">
-      <div className="absolute right-4 top-4 z-50 flex gap-2">
+      <div className="absolute right-4 top-4 z-[80] flex gap-2">
         <button 
           onClick={() => setShowInfo(!showInfo)}
           className={cn("rounded-full bg-white/10 p-2 text-white hover:bg-white/20", showInfo && "bg-white/30")}
@@ -281,8 +296,8 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
           </button>
         ) : (
           <a 
-            href={originalUrl} 
-            download
+            href={downloadUrl} 
+            download={photo.filename}
             className="rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
           >
             <Download className="h-6 w-6" />
@@ -340,7 +355,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
                x: { type: "spring", stiffness: 300, damping: 30 },
                opacity: { duration: 0.2 }
              }}
-             drag={!isZoomed ? "x" : false}
+             drag={!isZoomed && !isWeChatEnv ? "x" : false}
              dragConstraints={{ left: 0, right: 0 }}
              dragElastic={0.2}
              onDragEnd={handleDragEnd}
@@ -351,7 +366,10 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
                  isMultiTouchRef.current = false;
                }
              }}
-             className="absolute inset-0 flex items-center justify-center p-4 touch-none"
+             className={cn(
+               "absolute inset-0 flex items-center justify-center p-4",
+               isWeChatEnv ? "touch-auto" : "touch-none"
+             )}
            >
              <TransformWrapper
                 ref={transformComponentRef}
@@ -365,7 +383,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
                   mode: "reset",
                   step: 3 // Double click to zoom in 3x
                 }}
-                panning={{ disabled: !isZoomed }}
+                panning={{ disabled: !isZoomed || isWeChatEnv }}
               >
                 <TransformComponent
                   wrapperClass="!w-full !h-full"
@@ -402,6 +420,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
                     onError={handleShownImageError}
                     // 微信环境不阻止右键/长按菜单，允许分享和保存
                     onContextMenu={isWeChatEnv ? undefined : (e) => e.preventDefault()}
+                    style={weChatImageStyle}
                     decoding="async"
                   />
 
@@ -458,7 +477,7 @@ export function PhotoViewer({ photos, initialIndex, onClose, onLoadMore, hasMore
       )}
 
       {showInfo && (
-        <div className="absolute right-4 top-20 max-h-[calc(100vh-7rem)] w-80 overflow-y-auto rounded-2xl bg-black/40 p-6 text-white backdrop-blur-2xl border border-white/10 shadow-2xl transition-all duration-300">
+        <div className="absolute right-4 top-20 z-[70] max-h-[calc(100vh-7rem)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl bg-black/70 p-6 text-white backdrop-blur-2xl border border-white/10 shadow-2xl transition-all duration-300">
           <h3 className="mb-4 text-xl font-bold tracking-tight">Details</h3>
           <div className="space-y-4 text-sm">
             <div>

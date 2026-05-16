@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, useMotionValue, useAnimation, PanInfo } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Home } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { InternalLink } from '@/components/InternalLink';
 
 interface DraggableDateTimelineProps {
   initialDate?: Date;
@@ -437,13 +437,13 @@ export function BottomCapsuleDateTimeline({ initialDate = new Date(), value, onD
     return (
       <>
         {showHome ? (
-          <Link
+          <InternalLink
             to="/"
             className="flex items-center justify-center h-10 w-10 rounded-full text-white/70 hover:text-white hover:bg-white/5 transition-colors"
             aria-label="返回主页"
           >
             <Home className="h-5 w-5" />
-          </Link>
+          </InternalLink>
         ) : null}
 
         <motion.div
@@ -526,13 +526,13 @@ export function BottomCapsuleDateTimeline({ initialDate = new Date(), value, onD
       <div className="w-full flex justify-center">
         <div className="relative inline-flex items-center gap-2 max-w-[92vw] rounded-full bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl ring-1 ring-white/5 px-2.5 py-2">
           {showHome ? (
-            <Link
+            <InternalLink
               to="/"
               className="flex items-center justify-center h-10 w-10 rounded-full text-white/70 hover:text-white hover:bg-white/5 transition-colors"
               aria-label="返回主页"
             >
               <Home className="h-5 w-5" />
-            </Link>
+            </InternalLink>
           ) : null}
 
           <motion.div
